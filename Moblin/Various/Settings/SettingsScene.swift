@@ -1,0 +1,3507 @@
+import AVFoundation
+import SwiftUI
+
+private func decodeCameraId<T>(_ container: KeyedDecodingContainer<T>,
+                               _ key: KeyedDecodingContainer<T>.Key,
+                               _ defaultValue: CameraId) -> CameraId
+{
+    var cameraId = container.decode(key, CameraId.self, defaultValue)
+    if AVCaptureDevice(uniqueID: cameraId) == nil {
+        cameraId = defaultValue
+    }
+    return cameraId
+}
+
+private func decodeCameraPosition<T>(_ container: KeyedDecodingContainer<T>,
+                                     _ key: KeyedDecodingContainer<T>.Key,
+                                     _ defaultValue: SettingsSceneCameraPosition)
+    -> SettingsSceneCameraPosition
+{
+    var position = container.decode(key, SettingsSceneCameraPosition.self, defaultValue)
+    if (position == .backTripleLowEnergy && !hasTripleBackCamera)
+        || (position == .backDualLowEnergy && !hasDualBackCamera)
+        || (position == .backWideDualLowEnergy && !hasWideDualBackCamera)
+    {
+        position = defaultValue
+    }
+    return position
+}
+
+enum SettingsVideoEffectType: String, Codable, CaseIterable {
+    case shape
+    case grayScale
+    case sepia
+    case whirlpool
+    case pinch
+    case removeBackground
+    case dewarp360
+    case anamorphicLens
+    case lut
+    case opacity
+
+    func toString() -> String {
+        switch self {
+        case .shape:
+            return String(localized: "Shape")
+        case .grayScale:
+            return String(localized: "Gray scale")
+        case .sepia:
+            return String(localized: "Sepia")
+        case .whirlpool:
+            return String(localized: "Whirlpool")
+        case .pinch:
+            return String(localized: "Pinch")
+        case .removeBackground:
+            return String(localized: "Remove background")
+        case .dewarp360:
+            return String(localized: "Dewarp 360")
+        case .anamorphicLens:
+            return String(localized: "Anamorphic lens")
+        case .lut:
+            return String(localized: "LUT")
+        case .opacity:
+            return String(localized: "Opacity")
+        }
+    }
+}
+
+private let defaultFromColor = RgbColor(red: 220, green: 235, blue: 92)
+private let defaultToColor = RgbColor(red: 82, green: 180, blue: 203)
+
+class SettingsVideoEffectRemoveBackground: Codable, ObservableObject {
+    var from: RgbColor = defaultFromColor
+    @Published var fromColor: Color
+    var to: RgbColor = defaultToColor
+    @Published var toColor: Color
+
+    enum CodingKeys: CodingKey {
+        case from,
+             to
+    }
+
+    init() {
+        fromColor = from.color()
+        toColor = to.color()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.from, from)
+        try container.encode(.to, to)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        from = container.decode(.from, RgbColor.self, defaultFromColor)
+        fromColor = from.color()
+        to = container.decode(.to, RgbColor.self, defaultToColor)
+        toColor = to.color()
+    }
+}
+
+class SettingsVideoEffectShape: Codable, ObservableObject {
+    @Published var cornerRadius: Float = 0.1
+    @Published var borderWidth: Double = 0
+    var borderColor: RgbColor = .init(red: 0, green: 0, blue: 0)
+    @Published var borderColorColor: Color
+    @Published var cropEnabled: Bool = false
+    var cropX: Double = 0.25
+    var cropY: Double = 0.0
+    var cropWidth: Double = 0.5
+    var cropHeight: Double = 1.0
+
+    enum CodingKeys: CodingKey {
+        case cornerRadius,
+             borderWidth,
+             borderColor,
+             cropEnabled,
+             cropX,
+             cropY,
+             cropWidth,
+             cropHeight
+    }
+
+    init() {
+        borderColorColor = borderColor.color()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.cornerRadius, cornerRadius)
+        try container.encode(.borderWidth, borderWidth)
+        try container.encode(.borderColor, borderColor)
+        try container.encode(.cropEnabled, cropEnabled)
+        try container.encode(.cropX, cropX)
+        try container.encode(.cropY, cropY)
+        try container.encode(.cropWidth, cropWidth)
+        try container.encode(.cropHeight, cropHeight)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cornerRadius = container.decode(.cornerRadius, Float.self, 0.1)
+        borderWidth = container.decode(.borderWidth, Double.self, 0)
+        borderColor = container.decode(.borderColor, RgbColor.self, .init(red: 0, green: 0, blue: 0))
+        borderColorColor = borderColor.color()
+        cropEnabled = container.decode(.cropEnabled, Bool.self, false)
+        cropX = container.decode(.cropX, Double.self, 0.25)
+        cropY = container.decode(.cropY, Double.self, 0.0)
+        cropWidth = container.decode(.cropWidth, Double.self, 0.5)
+        cropHeight = container.decode(.cropHeight, Double.self, 1.0)
+    }
+
+    func toSettings() -> ShapeEffectSettings {
+        return .init(cornerRadius: cornerRadius,
+                     borderWidth: borderWidth,
+                     borderColor: CIColor(
+                         red: Double(borderColor.red) / 255,
+                         green: Double(borderColor.green) / 255,
+                         blue: Double(borderColor.blue) / 255
+                     ),
+                     cropEnabled: cropEnabled,
+                     cropX: cropX,
+                     cropY: cropY,
+                     cropWidth: cropWidth,
+                     cropHeight: cropHeight)
+    }
+}
+
+class SettingsVideoEffectDewarp360: Codable, ObservableObject {
+    @Published var pan: Float = 0
+    @Published var tilt: Float = 0
+    var zoom: Float = 1
+    @Published var inverseFieldOfView: Float = 90
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case pan,
+             tilt,
+             zoom
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.pan, pan)
+        try container.encode(.tilt, tilt)
+        try container.encode(.zoom, zoom)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pan = container.decode(.pan, Float.self, 0)
+        tilt = container.decode(.tilt, Float.self, 0)
+        zoom = container.decode(.zoom, Float.self, 1)
+        inverseFieldOfView = 180 - zoomToFieldOfView(zoom: zoom).toDegrees()
+    }
+
+    func updateZoomFromInverseFieldOfView() {
+        zoom = fieldOfViewToZoom(fieldOfView: (180 - inverseFieldOfView).toRadians())
+    }
+
+    func toSettings() -> Dewarp360EffectSettings {
+        return .direct(pan: -pan.toRadians(),
+                       tilt: tilt.toRadians(),
+                       fieldOfView: zoomToFieldOfView(zoom: zoom))
+    }
+}
+
+class SettingsVideoEffectAnamorphicLens: Codable, ObservableObject {
+    @Published var scale: Double = 1.33
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case scale
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.scale, scale)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        scale = container.decode(.scale, Double.self, 1.33)
+    }
+
+    func clone() -> SettingsVideoEffectAnamorphicLens {
+        let new = SettingsVideoEffectAnamorphicLens()
+        new.scale = scale
+        return new
+    }
+}
+
+class SettingsVideoEffectLut: Codable, ObservableObject {
+    @Published var lut: UUID?
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case lut
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.lut, lut)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        lut = container.decode(.lut, UUID?.self, .init())
+    }
+}
+
+class SettingsVideoEffectOpacity: Codable, ObservableObject {
+    @Published var opacity: Double = 0.5
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case opacity
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.opacity, opacity)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        opacity = container.decode(.opacity, Double.self, 0.5)
+    }
+}
+
+class SettingsVideoEffect: Codable, Identifiable, ObservableObject {
+    var id: UUID = .init()
+    @Published var enabled: Bool = true
+    @Published var type: SettingsVideoEffectType = .shape
+    var removeBackground: SettingsVideoEffectRemoveBackground = .init()
+    var shape: SettingsVideoEffectShape = .init()
+    var dewarp360: SettingsVideoEffectDewarp360 = .init()
+    var anamorphicLens: SettingsVideoEffectAnamorphicLens = .init()
+    var lut: SettingsVideoEffectLut = .init()
+    var opacity: SettingsVideoEffectOpacity = .init()
+
+    enum CodingKeys: CodingKey {
+        case id,
+             enabled,
+             type,
+             removeBackground,
+             shape,
+             dewarp360,
+             anamorphicLens,
+             lut,
+             opacity
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.enabled, enabled)
+        try container.encode(.type, type)
+        try container.encode(.removeBackground, removeBackground)
+        try container.encode(.shape, shape)
+        try container.encode(.dewarp360, dewarp360)
+        try container.encode(.anamorphicLens, anamorphicLens)
+        try container.encode(.lut, lut)
+        try container.encode(.opacity, opacity)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        enabled = container.decode(.enabled, Bool.self, true)
+        type = container.decode(.type, SettingsVideoEffectType.self, .shape)
+        removeBackground = container.decode(
+            .removeBackground,
+            SettingsVideoEffectRemoveBackground.self,
+            .init()
+        )
+        shape = container.decode(.shape, SettingsVideoEffectShape.self, .init())
+        dewarp360 = container.decode(.dewarp360, SettingsVideoEffectDewarp360.self, .init())
+        anamorphicLens = container.decode(
+            .anamorphicLens,
+            SettingsVideoEffectAnamorphicLens.self,
+            .init()
+        )
+        lut = container.decode(.lut, SettingsVideoEffectLut.self, .init())
+        opacity = container.decode(.opacity, SettingsVideoEffectOpacity.self, .init())
+    }
+
+    func getEffect(model: Model) -> VideoEffect {
+        switch type {
+        case .grayScale:
+            return GrayScaleEffect()
+        case .sepia:
+            return SepiaEffect()
+        case .whirlpool:
+            return WhirlpoolEffect(angle: .pi / 2)
+        case .pinch:
+            return PinchEffect(scale: 0.5)
+        case .removeBackground:
+            let effect = RemoveBackgroundEffect()
+            effect.setColorRange(from: removeBackground.from, to: removeBackground.to)
+            return effect
+        case .shape:
+            let effect = ShapeEffect()
+            effect.setSettings(settings: shape.toSettings())
+            return effect
+        case .dewarp360:
+            let effect = Dewarp360Effect()
+            effect.setSettings(settings: dewarp360.toSettings())
+            return effect
+        case .anamorphicLens:
+            return AnamorphicLensEffect(settings: anamorphicLens.clone())
+        case .lut:
+            let effect = LutEffect()
+            if let id = lut.lut, let lut = model.getLogLutById(id: id) {
+                effect.setLut(lut: lut.clone(), imageStorage: model.imageStorage) { title, subTitle in
+                    model.makeErrorToastMain(title: title, subTitle: subTitle)
+                }
+            }
+            return effect
+        case .opacity:
+            let effect = OpacityEffect()
+            effect.setOpacity(opacity: opacity.opacity)
+            return effect
+        }
+    }
+}
+
+enum SettingsFontDesign: String, Codable, CaseIterable {
+    case `default` = "Default"
+    case serif = "Serif"
+    case rounded = "Rounded"
+    case monospaced = "Monospaced"
+
+    func toString() -> String {
+        switch self {
+        case .default:
+            return String(localized: "Default")
+        case .serif:
+            return String(localized: "Serif")
+        case .rounded:
+            return String(localized: "Rounded")
+        case .monospaced:
+            return String(localized: "Monospaced")
+        }
+    }
+
+    func toSystem() -> Font.Design {
+        switch self {
+        case .default:
+            return .default
+        case .serif:
+            return .serif
+        case .rounded:
+            return .rounded
+        case .monospaced:
+            return .monospaced
+        }
+    }
+}
+
+enum SettingsFontWeight: String, Codable, CaseIterable {
+    case regular = "Regular"
+    case light = "Light"
+    case bold = "Bold"
+
+    func toString() -> String {
+        switch self {
+        case .regular:
+            return String(localized: "Regular")
+        case .light:
+            return String(localized: "Light")
+        case .bold:
+            return String(localized: "Bold")
+        }
+    }
+
+    func toSystem() -> Font.Weight {
+        switch self {
+        case .regular:
+            return .regular
+        case .light:
+            return .light
+        case .bold:
+            return .bold
+        }
+    }
+}
+
+enum SettingsHorizontalAlignment: String, Codable, CaseIterable {
+    case leading = "Leading"
+    case trailing = "Trailing"
+    case center = "Center"
+
+    func toString() -> String {
+        switch self {
+        case .leading:
+            return String(localized: "Leading")
+        case .trailing:
+            return String(localized: "Trailing")
+        case .center:
+            return String(localized: "Center")
+        }
+    }
+
+    func toSystem() -> HorizontalAlignment {
+        switch self {
+        case .leading:
+            return .leading
+        case .trailing:
+            return .trailing
+        case .center:
+            return .center
+        }
+    }
+}
+
+enum SettingsVerticalAlignment: String, Codable, CaseIterable {
+    case top = "Top"
+    case bottom = "Bottom"
+}
+
+enum SettingsAlignment: String, Codable, CaseIterable {
+    case topLeft = "TopLeft"
+    case topRight = "TopRight"
+    case bottomLeft = "BottomLeft"
+    case bottomRight = "BottomRight"
+    case topCenter = "TopCenter"
+    case bottomCenter = "BottomCenter"
+    case leftCenter = "LeftCenter"
+    case rightCenter = "RightCenter"
+    case center = "Center"
+
+    func isLeft() -> Bool {
+        return self == .topLeft || self == .bottomLeft || self == .leftCenter
+    }
+
+    func isHorizontalCenter() -> Bool {
+        return self == .topCenter || self == .bottomCenter || self == .center
+    }
+
+    func isVerticalCenter() -> Bool {
+        return self == .leftCenter || self == .rightCenter || self == .center
+    }
+
+    func isTop() -> Bool {
+        return self == .topLeft || self == .topRight || self == .topCenter
+    }
+
+    func mirrorPositionHorizontally() -> Bool {
+        return self == .topRight || self == .bottomRight || self == .rightCenter
+    }
+
+    func mirrorPositionVertically() -> Bool {
+        return self == .bottomLeft || self == .bottomRight || self == .bottomCenter
+    }
+}
+
+class SettingsWidgetTextTimer: Codable, Identifiable, ObservableObject {
+    var id: UUID = .init()
+    @Published var delta: Int = 5
+    @Published var endTime: Double = 0
+
+    enum CodingKeys: CodingKey {
+        case id,
+             delta,
+             endTime
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.delta, delta)
+        try container.encode(.endTime, endTime)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        delta = container.decode(.delta, Int.self, 5)
+        endTime = container.decode(.endTime, Double.self, 0)
+    }
+
+    func add(delta: Double) {
+        if timeLeft() < 0 {
+            endTime = Date().timeIntervalSince1970
+        }
+        endTime += delta
+    }
+
+    func set(time: Double) {
+        endTime = Date().timeIntervalSince1970 + time
+    }
+
+    func format() -> String {
+        return Duration(secondsComponent: Int64(max(timeLeft(), 0)), attosecondsComponent: 0)
+            .formatWithSeconds()
+    }
+
+    func textEffectEndTime() -> ContinuousClock.Instant {
+        return .now.advanced(by: .seconds(max(timeLeft(), 0)))
+    }
+
+    func timeLeft() -> Double {
+        return utcTimeDeltaFromNow(to: endTime)
+    }
+}
+
+class SettingsWidgetTextStopwatch: Codable, Identifiable, ObservableObject {
+    var id: UUID = .init()
+    var totalElapsed: Double = 0.0
+    var playPressedTime: ContinuousClock.Instant = .now
+    @Published var running: Bool = false
+
+    enum CodingKeys: CodingKey {
+        case id,
+             totalElapsed,
+             running
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.totalElapsed, totalElapsed)
+        try container.encode(.running, running)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        totalElapsed = container.decode(.totalElapsed, Double.self, 0)
+        running = container.decode(.running, Bool.self, false)
+    }
+
+    func clone() -> SettingsWidgetTextStopwatch {
+        let new = SettingsWidgetTextStopwatch()
+        new.id = id
+        new.totalElapsed = totalElapsed
+        new.playPressedTime = playPressedTime
+        new.running = running
+        return new
+    }
+
+    func currentTime() -> Double {
+        if running {
+            return totalElapsed + playPressedTime.duration(to: .now).seconds
+        } else {
+            return totalElapsed
+        }
+    }
+}
+
+class SettingsWidgetTextSubtitles: Codable {
+    var identifier: String?
+}
+
+class SettingsWidgetTextCheckbox: Codable, Identifiable {
+    var id: UUID = .init()
+    var checked: Bool = false
+}
+
+class SettingsWidgetTextRating: Codable, Identifiable {
+    var id: UUID = .init()
+    var rating: Int = 0
+}
+
+class SettingsWidgetTextLapTimes: Codable, Identifiable {
+    var id: UUID = .init()
+    var currentLapStartTime: Double?
+    var lapTimes: [Double] = []
+}
+
+class SettingsWidgetText: Codable, ObservableObject {
+    private static let defaultWidth: Int = 300
+    private static let defaultCornerRadius: Int = 10
+    @Published var formatString: String = "{shortTime}"
+    var backgroundColor: RgbColor = .init(red: 0, green: 0, blue: 0, opacity: 0.75)
+    @Published var backgroundColorColor: Color
+    var clearBackgroundColor: Bool = false
+    var foregroundColor: RgbColor = .init(red: 255, green: 255, blue: 255)
+    @Published var foregroundColorColor: Color
+    var clearForegroundColor: Bool = false
+    var fontSize: Int = 30
+    @Published var fontSizeFloat: Float
+    @Published var fontDesign: SettingsFontDesign = .default
+    @Published var fontWeight: SettingsFontWeight = .regular
+    @Published var fontMonospacedDigits: Bool = false
+    @Published var alignment: SettingsHorizontalAlignment = .leading
+    @Published var horizontalAlignment: SettingsHorizontalAlignment = .leading
+    @Published var verticalAlignment: SettingsVerticalAlignment = .top
+    @Published var delay: Double = 0.0
+    @Published var timers: [SettingsWidgetTextTimer] = []
+    @Published var stopwatches: [SettingsWidgetTextStopwatch] = []
+    var needsWeather: Bool = false
+    var needsGeography: Bool = false
+    var needsSubtitles: Bool = false
+    var subtitles: [SettingsWidgetTextSubtitles] = []
+    @Published var checkboxes: [SettingsWidgetTextCheckbox] = []
+    @Published var ratings: [SettingsWidgetTextRating] = []
+    @Published var lapTimes: [SettingsWidgetTextLapTimes] = []
+    var needsGForce: Bool = false
+    @Published var widthEnabled: Bool = false
+    @Published var width: Int = defaultWidth
+    @Published var cornerRadius: Int = defaultCornerRadius
+
+    enum CodingKeys: CodingKey {
+        case formatString,
+             backgroundColor,
+             clearBackgroundColor,
+             foregroundColor,
+             clearForegroundColor,
+             fontSize,
+             fontDesign,
+             fontWeight,
+             fontMonospacedDigits,
+             alignment,
+             horizontalAlignment,
+             verticalAlignment,
+             delay,
+             timers,
+             stopwatches,
+             needsWeather,
+             needsGeography,
+             needsSubtitles,
+             subtitles,
+             checkboxes,
+             ratings,
+             lapTimes,
+             needsGForce,
+             widthEnabled,
+             width,
+             cornerRadius
+    }
+
+    init() {
+        backgroundColorColor = backgroundColor.color()
+        foregroundColorColor = foregroundColor.color()
+        fontSizeFloat = Float(fontSize)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.formatString, formatString)
+        try container.encode(.backgroundColor, backgroundColor)
+        try container.encode(.clearBackgroundColor, clearBackgroundColor)
+        try container.encode(.foregroundColor, foregroundColor)
+        try container.encode(.clearForegroundColor, clearForegroundColor)
+        try container.encode(.fontSize, fontSize)
+        try container.encode(.fontDesign, fontDesign)
+        try container.encode(.fontWeight, fontWeight)
+        try container.encode(.fontMonospacedDigits, fontMonospacedDigits)
+        try container.encode(.alignment, alignment)
+        try container.encode(.horizontalAlignment, horizontalAlignment)
+        try container.encode(.verticalAlignment, verticalAlignment)
+        try container.encode(.delay, delay)
+        try container.encode(.timers, timers)
+        try container.encode(.stopwatches, stopwatches)
+        try container.encode(.needsWeather, needsWeather)
+        try container.encode(.needsGeography, needsGeography)
+        try container.encode(.needsSubtitles, needsSubtitles)
+        try container.encode(.subtitles, subtitles)
+        try container.encode(.checkboxes, checkboxes)
+        try container.encode(.ratings, ratings)
+        try container.encode(.lapTimes, lapTimes)
+        try container.encode(.needsGForce, needsGForce)
+        try container.encode(.widthEnabled, widthEnabled)
+        try container.encode(.width, width)
+        try container.encode(.cornerRadius, cornerRadius)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        formatString = container.decode(.formatString, String.self, "{shortTime}")
+        backgroundColor = container.decode(
+            .backgroundColor,
+            RgbColor.self,
+            .init(red: 0, green: 0, blue: 0, opacity: 0.75)
+        )
+        backgroundColorColor = backgroundColor.color()
+        clearBackgroundColor = container.decode(.clearBackgroundColor, Bool.self, false)
+        foregroundColor = container.decode(
+            .foregroundColor,
+            RgbColor.self,
+            .init(red: 255, green: 255, blue: 255)
+        )
+        foregroundColorColor = foregroundColor.color()
+        clearForegroundColor = container.decode(.clearForegroundColor, Bool.self, false)
+        fontSize = container.decode(.fontSize, Int.self, 30)
+        fontSizeFloat = Float(fontSize)
+        fontDesign = container.decode(.fontDesign, SettingsFontDesign.self, .default)
+        fontWeight = container.decode(.fontWeight, SettingsFontWeight.self, .regular)
+        fontMonospacedDigits = container.decode(.fontMonospacedDigits, Bool.self, false)
+        alignment = container.decode(.alignment, SettingsHorizontalAlignment.self, .leading)
+        horizontalAlignment = container.decode(
+            .horizontalAlignment,
+            SettingsHorizontalAlignment.self,
+            .leading
+        )
+        verticalAlignment = container.decode(.verticalAlignment, SettingsVerticalAlignment.self, .top)
+        delay = container.decode(.delay, Double.self, 0.0)
+        timers = container.decode(.timers, [SettingsWidgetTextTimer].self, [])
+        stopwatches = container.decode(.stopwatches, [SettingsWidgetTextStopwatch].self, [])
+        needsWeather = container.decode(.needsWeather, Bool.self, false)
+        needsGeography = container.decode(.needsGeography, Bool.self, false)
+        needsSubtitles = container.decode(.needsSubtitles, Bool.self, false)
+        subtitles = container.decode(.subtitles, [SettingsWidgetTextSubtitles].self, [])
+        checkboxes = container.decode(.checkboxes, [SettingsWidgetTextCheckbox].self, [])
+        ratings = container.decode(.ratings, [SettingsWidgetTextRating].self, [])
+        lapTimes = container.decode(.lapTimes, [SettingsWidgetTextLapTimes].self, [])
+        needsGForce = container.decode(.needsGForce, Bool.self, false)
+        widthEnabled = container.decode(.widthEnabled, Bool.self, false)
+        width = container.decode(.width, Int.self, Self.defaultWidth)
+        cornerRadius = container.decode(.cornerRadius, Int.self, Self.defaultCornerRadius)
+    }
+}
+
+class SettingsWidgetCrop: Codable {
+    var sourceWidgetId: UUID = .init()
+    var x: Int = 0
+    var y: Int = 0
+    var width: Int = 200
+    var height: Int = 200
+
+    func clone() -> SettingsWidgetCrop {
+        let new = SettingsWidgetCrop()
+        new.sourceWidgetId = sourceWidgetId
+        new.x = x
+        new.y = y
+        new.width = width
+        new.height = height
+        return new
+    }
+}
+
+enum SettingsWidgetBrowserMode: String, Codable, CaseIterable {
+    case periodicAudioAndVideo
+    case audioAndVideoOnly
+    case audioOnly
+
+    func toString() -> String {
+        switch self {
+        case .periodicAudioAndVideo:
+            return String(localized: "Periodic, audio and video")
+        case .audioAndVideoOnly:
+            return String(localized: "Audio and video only")
+        case .audioOnly:
+            return String(localized: "Audio only")
+        }
+    }
+}
+
+class SettingsWidgetBrowser: Codable, ObservableObject {
+    @Published var url: String = ""
+    @Published var width: Int = 500
+    @Published var height: Int = 500
+    @Published var mode: SettingsWidgetBrowserMode = .periodicAudioAndVideo
+    @Published var baseFps: Float = 5.0
+    @Published var styleSheet: String = ""
+    @Published var moblinAccess: Bool = false
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case url,
+             width,
+             height,
+             audioOnly,
+             mode,
+             fps,
+             styleSheet,
+             moblinAccess
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.url, url)
+        try container.encode(.width, width)
+        try container.encode(.height, height)
+        try container.encode(.mode, mode)
+        try container.encode(.fps, baseFps)
+        try container.encode(.styleSheet, styleSheet)
+        try container.encode(.moblinAccess, moblinAccess)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        url = container.decode(.url, String.self, "")
+        width = container.decode(.width, Int.self, 500)
+        height = container.decode(.height, Int.self, 500)
+        if let decodedMode = try? container.decode(SettingsWidgetBrowserMode.self, forKey: .mode) {
+            mode = decodedMode
+        } else {
+            let audioOnly = container.decode(.audioOnly, Bool.self, false)
+            mode = audioOnly ? .audioAndVideoOnly : .periodicAudioAndVideo
+        }
+        baseFps = container.decode(.fps, Float.self, 5.0)
+        styleSheet = container.decode(.styleSheet, String.self, "")
+        moblinAccess = container.decode(.moblinAccess, Bool.self, false)
+    }
+}
+
+class SettingsWidgetMap: Codable {
+    var northUp: Bool = false
+    var delay: Double = 0.0
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case northUp,
+             delay
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.northUp, northUp)
+        try container.encode(.delay, delay)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        northUp = container.decode(.northUp, Bool.self, false)
+        delay = container.decode(.delay, Double.self, 0.0)
+    }
+
+    func clone() -> SettingsWidgetMap {
+        let new = SettingsWidgetMap()
+        new.northUp = northUp
+        new.delay = delay
+        return new
+    }
+}
+
+class SettingsWidgetScene: Codable {
+    var sceneId: UUID = .init()
+}
+
+class SettingsWidgetQrCode: Codable {
+    var message = ""
+
+    func clone() -> SettingsWidgetQrCode {
+        let new = SettingsWidgetQrCode()
+        new.message = message
+        return new
+    }
+}
+
+enum SettingsWidgetAlertPositionType: String, Codable, CaseIterable {
+    case scene = "Scene"
+    case face = "Face"
+
+    func toString() -> String {
+        switch self {
+        case .scene:
+            return String(localized: "Scene")
+        case .face:
+            return String(localized: "Face")
+        }
+    }
+}
+
+class SettingsWidgetAlertFacePosition: Codable {
+    var x: Double = 0.25
+    var y: Double = 0.25
+    var width: Double = 0.5
+    var height: Double = 0.5
+}
+
+enum SettingsWidgetAlertsAlertMediaType: String, CaseIterable, Codable {
+    case gifAndSound
+    case video
+
+    func toString() -> LocalizedStringKey {
+        switch self {
+        case .gifAndSound:
+            return "GIF and sound"
+        case .video:
+            return "Video"
+        }
+    }
+}
+
+class SettingsWidgetAlertsAlert: Codable, ObservableObject {
+    var id: UUID = .init()
+    var enabled: Bool = true
+    @Published var mediaType: SettingsWidgetAlertsAlertMediaType = .gifAndSound
+    @Published var imageId: UUID = .init()
+    @Published var imageLoopCount: Int = 1
+    @Published var soundId: UUID = .init()
+    @Published var videoName: String = ""
+    var textColor: RgbColor = .init(red: 255, green: 255, blue: 255)
+    var accentColor: RgbColor = .init(red: 0xFD, green: 0xFB, blue: 0x67)
+    var fontSize: Int = 45
+    var fontDesign: SettingsFontDesign = .monospaced
+    var fontWeight: SettingsFontWeight = .bold
+    var textToSpeechEnabled: Bool = true
+    var textToSpeechDelay: Double = 1.5
+    @Published var textToSpeechLanguageVoices: [String: SettingsVoice] = .init()
+    var positionType: SettingsWidgetAlertPositionType = .scene
+    var facePosition: SettingsWidgetAlertFacePosition = .init()
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case id,
+             enabled,
+             mediaType,
+             imageId,
+             imageLoopCount,
+             soundId,
+             videoName,
+             textColor,
+             accentColor,
+             fontSize,
+             fontDesign,
+             fontWeight,
+             textToSpeechEnabled,
+             textToSpeechDelay,
+             textToSpeechLanguageVoices,
+             positionType,
+             facePosition
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.enabled, enabled)
+        try container.encode(.mediaType, mediaType)
+        try container.encode(.imageId, imageId)
+        try container.encode(.imageLoopCount, imageLoopCount)
+        try container.encode(.soundId, soundId)
+        try container.encode(.videoName, videoName)
+        try container.encode(.textColor, textColor)
+        try container.encode(.accentColor, accentColor)
+        try container.encode(.fontSize, fontSize)
+        try container.encode(.fontDesign, fontDesign)
+        try container.encode(.fontWeight, fontWeight)
+        try container.encode(.textToSpeechEnabled, textToSpeechEnabled)
+        try container.encode(.textToSpeechDelay, textToSpeechDelay)
+        try container.encode(.textToSpeechLanguageVoices, textToSpeechLanguageVoices)
+        try container.encode(.positionType, positionType)
+        try container.encode(.facePosition, facePosition)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        enabled = container.decode(.enabled, Bool.self, true)
+        mediaType = container.decode(.mediaType, SettingsWidgetAlertsAlertMediaType.self, .gifAndSound)
+        imageId = container.decode(.imageId, UUID.self, .init())
+        imageLoopCount = container.decode(.imageLoopCount, Int.self, 1)
+        soundId = container.decode(.soundId, UUID.self, .init())
+        videoName = container.decode(.videoName, String.self, "")
+        textColor = container.decode(.textColor, RgbColor.self, .init(red: 255, green: 255, blue: 255))
+        accentColor = container.decode(.accentColor, RgbColor.self, .init(red: 0xFD, green: 0xFB, blue: 0x67))
+        fontSize = container.decode(.fontSize, Int.self, 45)
+        fontDesign = container.decode(.fontDesign, SettingsFontDesign.self, .monospaced)
+        fontWeight = container.decode(.fontWeight, SettingsFontWeight.self, .bold)
+        textToSpeechEnabled = container.decode(.textToSpeechEnabled, Bool.self, true)
+        textToSpeechDelay = container.decode(.textToSpeechDelay, Double.self, 1.5)
+        textToSpeechLanguageVoices = container.decode(.textToSpeechLanguageVoices,
+                                                      [String: SettingsVoice].self,
+                                                      .init())
+        for (languageCode, voice) in container.decode(
+            .textToSpeechLanguageVoices,
+            [String: String].self,
+            .init()
+        ) {
+            let settingsVoice = SettingsVoice()
+            settingsVoice.apple.voice = voice
+            textToSpeechLanguageVoices[languageCode] = settingsVoice
+        }
+        positionType = container.decode(.positionType, SettingsWidgetAlertPositionType.self, .scene)
+        facePosition = container.decode(.facePosition, SettingsWidgetAlertFacePosition.self, .init())
+    }
+
+    func isTextToSpeechEnabled() -> Bool {
+        return enabled && textToSpeechEnabled
+    }
+
+    func makeVideoFilename() -> String? {
+        guard let fileExtension = URL(string: "file:///\(videoName)")?.pathExtension else {
+            return nil
+        }
+        return "\(id).\(fileExtension)"
+    }
+
+    func clone() -> SettingsWidgetAlertsAlert {
+        let new = SettingsWidgetAlertsAlert()
+        new.id = id
+        new.enabled = enabled
+        new.mediaType = mediaType
+        new.imageId = imageId
+        new.imageLoopCount = imageLoopCount
+        new.soundId = soundId
+        new.videoName = videoName
+        new.textColor = textColor
+        new.accentColor = accentColor
+        new.fontSize = fontSize
+        new.fontDesign = fontDesign
+        new.fontWeight = fontWeight
+        new.textToSpeechEnabled = textToSpeechEnabled
+        new.textToSpeechDelay = textToSpeechDelay
+        new.textToSpeechLanguageVoices = textToSpeechLanguageVoices
+        new.positionType = positionType
+        new.facePosition = facePosition
+        return new
+    }
+}
+
+enum SettingsWidgetAlertsCheerBitsAlertOperator: String, Codable, CaseIterable {
+    case equal = "="
+    case greaterEqual = ">="
+
+    init(from decoder: Decoder) throws {
+        self = try SettingsWidgetAlertsCheerBitsAlertOperator(rawValue: decoder.singleValueContainer()
+            .decode(RawValue.self)) ??
+            .equal
+    }
+}
+
+let cheerBitsAlertOperators = SettingsWidgetAlertsCheerBitsAlertOperator.allCases.map { $0.rawValue }
+
+class SettingsWidgetAlertsCheerBitsAlert: Codable, Identifiable {
+    var id: UUID = .init()
+    var bits: Int = 1
+    var comparisonOperator: SettingsWidgetAlertsCheerBitsAlertOperator = .greaterEqual
+    var alert: SettingsWidgetAlertsAlert = .init()
+
+    func clone() -> SettingsWidgetAlertsCheerBitsAlert {
+        let new = SettingsWidgetAlertsCheerBitsAlert()
+        new.bits = bits
+        new.comparisonOperator = comparisonOperator
+        new.alert = alert
+        return new
+    }
+}
+
+class SettingsWidgetAlertsKickGiftsAlert: Codable, Identifiable {
+    var id: UUID = .init()
+    var amount: Int = 1
+    var comparisonOperator: SettingsWidgetAlertsCheerBitsAlertOperator = .greaterEqual
+    var alert: SettingsWidgetAlertsAlert = .init()
+
+    func clone() -> SettingsWidgetAlertsKickGiftsAlert {
+        let new = SettingsWidgetAlertsKickGiftsAlert()
+        new.amount = amount
+        new.comparisonOperator = comparisonOperator
+        new.alert = alert
+        return new
+    }
+}
+
+private func createDefaultCheerBits() -> [SettingsWidgetAlertsCheerBitsAlert] {
+    var cheerBits: [SettingsWidgetAlertsCheerBitsAlert] = []
+    for (index, bits) in [1].enumerated() {
+        let cheer = SettingsWidgetAlertsCheerBitsAlert()
+        cheer.bits = bits
+        cheer.alert.enabled = index == 0
+        cheerBits.append(cheer)
+    }
+    return cheerBits
+}
+
+private func createDefaultKickGifts() -> [SettingsWidgetAlertsKickGiftsAlert] {
+    var kickGifts: [SettingsWidgetAlertsKickGiftsAlert] = []
+    for (index, amount) in [1].enumerated() {
+        let gift = SettingsWidgetAlertsKickGiftsAlert()
+        gift.amount = amount
+        gift.alert.enabled = index == 0
+        kickGifts.append(gift)
+    }
+    return kickGifts
+}
+
+class SettingsWidgetAlertsTwitch: Codable {
+    var follows: SettingsWidgetAlertsAlert = .init()
+    var subscriptions: SettingsWidgetAlertsAlert = .init()
+    var raids: SettingsWidgetAlertsAlert = .init()
+    var cheers: SettingsWidgetAlertsAlert = .init()
+    var cheerBits: [SettingsWidgetAlertsCheerBitsAlert] = createDefaultCheerBits()
+    var redemptions: [SettingsWidgetAlertsAlert] = []
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case follows,
+             subscriptions,
+             raids,
+             cheers,
+             cheerBits
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.follows, follows)
+        try container.encode(.subscriptions, subscriptions)
+        try container.encode(.raids, raids)
+        try container.encode(.cheers, cheers)
+        try container.encode(.cheerBits, cheerBits)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        follows = container.decode(.follows, SettingsWidgetAlertsAlert.self, .init())
+        subscriptions = container.decode(.subscriptions, SettingsWidgetAlertsAlert.self, .init())
+        raids = container.decode(.raids, SettingsWidgetAlertsAlert.self, .init())
+        cheers = container.decode(.cheers, SettingsWidgetAlertsAlert.self, .init())
+        cheerBits = container.decode(
+            .cheerBits,
+            [SettingsWidgetAlertsCheerBitsAlert].self,
+            createDefaultCheerBits()
+        )
+    }
+
+    func clone() -> SettingsWidgetAlertsTwitch {
+        let new = SettingsWidgetAlertsTwitch()
+        new.follows = follows.clone()
+        new.subscriptions = subscriptions.clone()
+        new.raids = raids.clone()
+        new.cheers = cheers.clone()
+        new.cheerBits = cheerBits.map { $0.clone() }
+        return new
+    }
+
+    func disableAll() {
+        follows.enabled = false
+        subscriptions.enabled = false
+        raids.enabled = false
+        cheers.enabled = false
+        for cheerBit in cheerBits {
+            cheerBit.alert.enabled = false
+        }
+    }
+}
+
+class SettingsWidgetAlertsKick: Codable {
+    var subscriptions: SettingsWidgetAlertsAlert = .init()
+    var giftedSubscriptions: SettingsWidgetAlertsAlert = .init()
+    var hosts: SettingsWidgetAlertsAlert = .init()
+    var rewards: SettingsWidgetAlertsAlert = .init()
+    var kickGifts: [SettingsWidgetAlertsKickGiftsAlert] = createDefaultKickGifts()
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case subscriptions,
+             giftedSubscriptions,
+             hosts,
+             rewards,
+             kickGifts
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.subscriptions, subscriptions)
+        try container.encode(.giftedSubscriptions, giftedSubscriptions)
+        try container.encode(.hosts, hosts)
+        try container.encode(.rewards, rewards)
+        try container.encode(.kickGifts, kickGifts)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        subscriptions = container.decode(.subscriptions, SettingsWidgetAlertsAlert.self, .init())
+        giftedSubscriptions = container.decode(.giftedSubscriptions, SettingsWidgetAlertsAlert.self, .init())
+        hosts = container.decode(.hosts, SettingsWidgetAlertsAlert.self, .init())
+        rewards = container.decode(.rewards, SettingsWidgetAlertsAlert.self, .init())
+        kickGifts = container.decode(
+            .kickGifts,
+            [SettingsWidgetAlertsKickGiftsAlert].self,
+            createDefaultKickGifts()
+        )
+    }
+
+    func clone() -> SettingsWidgetAlertsKick {
+        let new = SettingsWidgetAlertsKick()
+        new.subscriptions = subscriptions.clone()
+        new.giftedSubscriptions = giftedSubscriptions.clone()
+        new.hosts = hosts.clone()
+        new.rewards = rewards.clone()
+        new.kickGifts = kickGifts.map { $0.clone() }
+        return new
+    }
+
+    func disableAll() {
+        subscriptions.enabled = false
+        giftedSubscriptions.enabled = false
+        hosts.enabled = false
+        rewards.enabled = false
+        for kickGift in kickGifts {
+            kickGift.alert.enabled = false
+        }
+    }
+}
+
+enum SettingsWidgetAlertsChatBotCommandImageType: String, Codable, CaseIterable {
+    case file = "File"
+}
+
+class SettingsWidgetAlertsChatBotCommand: Codable, Identifiable, @unchecked Sendable {
+    var id: UUID = .init()
+    var name: String = "myname"
+    var alert: SettingsWidgetAlertsAlert = .init()
+    var imageType: SettingsWidgetAlertsChatBotCommandImageType = .file
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case id,
+             name,
+             alert,
+             imageType
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.name, name)
+        try container.encode(.alert, alert)
+        try container.encode(.imageType, imageType)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        name = container.decode(.name, String.self, "myname")
+        alert = container.decode(.alert, SettingsWidgetAlertsAlert.self, .init())
+        imageType = container.decode(.imageType, SettingsWidgetAlertsChatBotCommandImageType.self, .file)
+    }
+
+    func clone() -> SettingsWidgetAlertsChatBotCommand {
+        let new = SettingsWidgetAlertsChatBotCommand()
+        new.name = name
+        new.alert = alert.clone()
+        new.imageType = imageType
+        return new
+    }
+}
+
+class SettingsWidgetAlertsChatBot: Codable, ObservableObject {
+    @Published var commands: [SettingsWidgetAlertsChatBotCommand] = []
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case commands
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.commands, commands)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        commands = container.decode(.commands, [SettingsWidgetAlertsChatBotCommand].self, .init())
+    }
+
+    func clone() -> SettingsWidgetAlertsChatBot {
+        let new = SettingsWidgetAlertsChatBot()
+        for command in commands {
+            new.commands.append(command.clone())
+        }
+        return new
+    }
+
+    func disableAll() {
+        for command in commands {
+            command.alert.enabled = false
+        }
+    }
+}
+
+class SettingsWidgetAlertsSpeechToTextString: Codable, Identifiable {
+    var id: UUID = .init()
+    var string: String = ""
+    var alert: SettingsWidgetAlertsAlert = .init()
+
+    func clone() -> SettingsWidgetAlertsSpeechToTextString {
+        let new = SettingsWidgetAlertsSpeechToTextString()
+        new.id = id
+        new.string = string
+        new.alert = alert.clone()
+        return new
+    }
+}
+
+class SettingsWidgetAlertsSpeechToText: Codable, ObservableObject {
+    @Published var strings: [SettingsWidgetAlertsSpeechToTextString] = []
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case strings
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.strings, strings)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        strings = container.decode(.strings, [SettingsWidgetAlertsSpeechToTextString].self, .init())
+    }
+
+    func clone() -> SettingsWidgetAlertsSpeechToText {
+        let new = SettingsWidgetAlertsSpeechToText()
+        for string in strings {
+            new.strings.append(string.clone())
+        }
+        return new
+    }
+
+    func disableAll() {
+        for string in strings {
+            string.alert.enabled = false
+        }
+    }
+}
+
+class SettingsTtsMonster: Codable, ObservableObject {
+    @Published var apiToken: String = ""
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case apiToken
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.apiToken, apiToken)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        apiToken = container.decode(.apiToken, String.self, "")
+    }
+
+    func clone() -> SettingsTtsMonster {
+        let new = SettingsTtsMonster()
+        new.apiToken = apiToken
+        return new
+    }
+}
+
+class SettingsWidgetAlerts: Codable, ObservableObject {
+    private static let aiPersonality = "You are rude and gives insulting answers. Answer in a few sentences."
+    var twitch: SettingsWidgetAlertsTwitch = .init()
+    var kick: SettingsWidgetAlertsKick = .init()
+    var chatBot: SettingsWidgetAlertsChatBot = .init()
+    var speechToText: SettingsWidgetAlertsSpeechToText = .init()
+    var quickButton: SettingsWidgetAlertsAlert = .init()
+    var needsSubtitles: Bool = false
+    var ai: SettingsOpenAi = .init(personality: aiPersonality)
+    @Published var aiEnabled: Bool = false
+    var ttsMonster: SettingsTtsMonster = .init()
+
+    init() {}
+
+    enum CodingKeys: CodingKey {
+        case twitch,
+             kick,
+             chatBot,
+             speechToText,
+             needsSubtitles,
+             ai,
+             aiEnabled,
+             ttsMonster
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.twitch, twitch)
+        try container.encode(.kick, kick)
+        try container.encode(.chatBot, chatBot)
+        try container.encode(.speechToText, speechToText)
+        try container.encode(.needsSubtitles, needsSubtitles)
+        try container.encode(.ai, ai)
+        try container.encode(.aiEnabled, aiEnabled)
+        try container.encode(.ttsMonster, ttsMonster)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        twitch = container.decode(.twitch, SettingsWidgetAlertsTwitch.self, .init())
+        kick = container.decode(.kick, SettingsWidgetAlertsKick.self, .init())
+        chatBot = container.decode(.chatBot, SettingsWidgetAlertsChatBot.self, .init())
+        speechToText = container.decode(.speechToText, SettingsWidgetAlertsSpeechToText.self, .init())
+        needsSubtitles = container.decode(.needsSubtitles, Bool.self, false)
+        ai = container.decode(
+            .ai,
+            SettingsOpenAi.self,
+            .init(personality: SettingsWidgetAlerts.aiPersonality)
+        )
+        aiEnabled = container.decode(.aiEnabled, Bool.self, false)
+        ttsMonster = container.decode(.ttsMonster, SettingsTtsMonster.self, .init())
+    }
+
+    func clone() -> SettingsWidgetAlerts {
+        let new = SettingsWidgetAlerts()
+        new.twitch = twitch.clone()
+        new.kick = kick.clone()
+        new.chatBot = chatBot.clone()
+        new.speechToText = speechToText.clone()
+        new.needsSubtitles = needsSubtitles
+        new.ai = ai.clone()
+        new.aiEnabled = aiEnabled
+        new.ttsMonster = ttsMonster.clone()
+        return new
+    }
+
+    func disableAll() {
+        twitch.disableAll()
+        kick.disableAll()
+        chatBot.disableAll()
+        speechToText.disableAll()
+        quickButton.enabled = false
+    }
+}
+
+enum SettingsSceneSwitchTransition: String, Codable, CaseIterable {
+    case blur = "Blur"
+    case freeze = "Freeze"
+    case blurAndZoom = "Blur & zoom"
+
+    func toString() -> String {
+        switch self {
+        case .blur:
+            return String(localized: "Blur")
+        case .freeze:
+            return String(localized: "Freeze")
+        case .blurAndZoom:
+            return String(localized: "Blur & zoom")
+        }
+    }
+
+    func toVideoUnit() -> SceneSwitchTransition {
+        switch self {
+        case .blur:
+            return .blur
+        case .freeze:
+            return .freeze
+        case .blurAndZoom:
+            return .blurAndZoom
+        }
+    }
+}
+
+struct SettingsSensitivity: Codable, Equatable {
+    var mouth: Double = 1
+    var eyes: Double = 1
+}
+
+class SettingsWidgetVTuber: Codable, ObservableObject {
+    var id: UUID = .init()
+    @Published var videoSource: SettingsVideoSource = .init()
+    @Published var cameraPositionY: Double = 1.37
+    @Published var cameraFieldOfView: Double = 18
+    @Published var modelName: String = ""
+    @Published var mirror: Bool = false
+    @Published var sensitivity: SettingsSensitivity = .init()
+    @Published var armsAngle: Double = 72.0
+
+    enum CodingKeys: CodingKey {
+        case id,
+             cameraPosition,
+             backCameraId,
+             frontCameraId,
+             rtmpCameraId,
+             srtlaCameraId,
+             ristCameraId,
+             rtspCameraId,
+             whipCameraId,
+             whepCameraId,
+             mediaPlayerCameraId,
+             externalCameraId,
+             externalCameraName,
+             cameraPositionY,
+             cameraFieldOfView,
+             modelName,
+             mirror,
+             sensitivity,
+             armsAngle
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.cameraPosition, videoSource.cameraPosition)
+        try container.encode(.backCameraId, videoSource.backCameraId)
+        try container.encode(.frontCameraId, videoSource.frontCameraId)
+        try container.encode(.rtmpCameraId, videoSource.rtmpCameraId)
+        try container.encode(.srtlaCameraId, videoSource.srtlaCameraId)
+        try container.encode(.ristCameraId, videoSource.ristCameraId)
+        try container.encode(.rtspCameraId, videoSource.rtspCameraId)
+        try container.encode(.whipCameraId, videoSource.whipCameraId)
+        try container.encode(.whepCameraId, videoSource.whepCameraId)
+        try container.encode(.mediaPlayerCameraId, videoSource.mediaPlayerCameraId)
+        try container.encode(.externalCameraId, videoSource.externalCameraId)
+        try container.encode(.externalCameraName, videoSource.externalCameraName)
+        try container.encode(.cameraPositionY, cameraPositionY)
+        try container.encode(.cameraFieldOfView, cameraFieldOfView)
+        try container.encode(.modelName, modelName)
+        try container.encode(.mirror, mirror)
+        try container.encode(.sensitivity, sensitivity)
+        try container.encode(.armsAngle, armsAngle)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        videoSource.cameraPosition = decodeCameraPosition(container, .cameraPosition, .screenCapture)
+        videoSource.backCameraId = decodeCameraId(container, .backCameraId, bestBackCameraId)
+        videoSource.frontCameraId = decodeCameraId(container, .frontCameraId, bestFrontCameraId)
+        videoSource.rtmpCameraId = container.decode(.rtmpCameraId, UUID.self, .init())
+        videoSource.srtlaCameraId = container.decode(.srtlaCameraId, UUID.self, .init())
+        videoSource.ristCameraId = container.decode(.ristCameraId, UUID.self, .init())
+        videoSource.rtspCameraId = container.decode(.rtspCameraId, UUID.self, .init())
+        videoSource.whipCameraId = container.decode(.whipCameraId, UUID.self, .init())
+        videoSource.whepCameraId = container.decode(.whepCameraId, UUID.self, .init())
+        videoSource.mediaPlayerCameraId = container.decode(.mediaPlayerCameraId, UUID.self, .init())
+        videoSource.externalCameraId = container.decode(.externalCameraId, String.self, "")
+        videoSource.externalCameraName = container.decode(.externalCameraName, String.self, "")
+        cameraPositionY = container.decode(.cameraPositionY, Double.self, 1.37)
+        cameraFieldOfView = container.decode(.cameraFieldOfView, Double.self, 18)
+        modelName = container.decode(.modelName, String.self, "")
+        mirror = container.decode(.mirror, Bool.self, false)
+        sensitivity = container.decode(.sensitivity, SettingsSensitivity.self, .init())
+        armsAngle = container.decode(.armsAngle, Double.self, 72.0)
+    }
+
+    func toCameraId() -> SettingsCameraId {
+        return videoSource.toCameraId()
+    }
+
+    func updateCameraId(settingsCameraId: SettingsCameraId) {
+        videoSource.updateCameraId(settingsCameraId: settingsCameraId)
+    }
+}
+
+class SettingsWidgetPngTuber: Codable, ObservableObject {
+    var id: UUID = .init()
+    @Published var videoSource: SettingsVideoSource = .init()
+    @Published var modelName: String = ""
+    @Published var mirror: Bool = false
+    @Published var sensitivity: SettingsSensitivity = .init()
+
+    enum CodingKeys: CodingKey {
+        case id,
+             cameraPosition,
+             backCameraId,
+             frontCameraId,
+             rtmpCameraId,
+             srtlaCameraId,
+             ristCameraId,
+             rtspCameraId,
+             whipCameraId,
+             whepCameraId,
+             mediaPlayerCameraId,
+             externalCameraId,
+             externalCameraName,
+             modelName,
+             mirror,
+             sensitivity
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.cameraPosition, videoSource.cameraPosition)
+        try container.encode(.backCameraId, videoSource.backCameraId)
+        try container.encode(.frontCameraId, videoSource.frontCameraId)
+        try container.encode(.rtmpCameraId, videoSource.rtmpCameraId)
+        try container.encode(.srtlaCameraId, videoSource.srtlaCameraId)
+        try container.encode(.ristCameraId, videoSource.ristCameraId)
+        try container.encode(.rtspCameraId, videoSource.rtspCameraId)
+        try container.encode(.whipCameraId, videoSource.whipCameraId)
+        try container.encode(.whepCameraId, videoSource.whepCameraId)
+        try container.encode(.mediaPlayerCameraId, videoSource.mediaPlayerCameraId)
+        try container.encode(.externalCameraId, videoSource.externalCameraId)
+        try container.encode(.externalCameraName, videoSource.externalCameraName)
+        try container.encode(.modelName, modelName)
+        try container.encode(.mirror, mirror)
+        try container.encode(.sensitivity, sensitivity)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        videoSource.cameraPosition = decodeCameraPosition(container, .cameraPosition, .screenCapture)
+        videoSource.backCameraId = decodeCameraId(container, .backCameraId, bestBackCameraId)
+        videoSource.frontCameraId = decodeCameraId(container, .frontCameraId, bestFrontCameraId)
+        videoSource.rtmpCameraId = container.decode(.rtmpCameraId, UUID.self, .init())
+        videoSource.srtlaCameraId = container.decode(.srtlaCameraId, UUID.self, .init())
+        videoSource.ristCameraId = container.decode(.ristCameraId, UUID.self, .init())
+        videoSource.rtspCameraId = container.decode(.rtspCameraId, UUID.self, .init())
+        videoSource.whipCameraId = container.decode(.whipCameraId, UUID.self, .init())
+        videoSource.whepCameraId = container.decode(.whepCameraId, UUID.self, .init())
+        videoSource.mediaPlayerCameraId = container.decode(.mediaPlayerCameraId, UUID.self, .init())
+        videoSource.externalCameraId = container.decode(.externalCameraId, String.self, "")
+        videoSource.externalCameraName = container.decode(.externalCameraName, String.self, "")
+        modelName = container.decode(.modelName, String.self, "")
+        mirror = container.decode(.mirror, Bool.self, false)
+        sensitivity = container.decode(.sensitivity, SettingsSensitivity.self, .init())
+    }
+
+    func toCameraId() -> SettingsCameraId {
+        return videoSource.toCameraId()
+    }
+
+    func updateCameraId(settingsCameraId: SettingsCameraId) {
+        videoSource.updateCameraId(settingsCameraId: settingsCameraId)
+    }
+}
+
+class SettingsWidgetSnapshot: Codable, ObservableObject {
+    var id: UUID = .init()
+    @Published var showtime: Int = 5
+
+    enum CodingKeys: CodingKey {
+        case id,
+             showtime
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.showtime, showtime)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        showtime = container.decode(.showtime, Int.self, 5)
+    }
+}
+
+class SettingsWidgetChat: Codable, ObservableObject {
+    var id: UUID = .init()
+    @Published var fontSize: Float = 19.0
+    var usernameColor: RgbColor = .init(red: 255, green: 163, blue: 0)
+    @Published var usernameColorColor: Color = RgbColor(red: 255, green: 163, blue: 0).color()
+    var messageColor: RgbColor = .init(red: 255, green: 255, blue: 255)
+    @Published var messageColorColor: Color = RgbColor(red: 255, green: 255, blue: 255).color()
+    var backgroundColor: RgbColor = .init(red: 0, green: 0, blue: 0)
+    @Published var backgroundColorColor: Color = RgbColor(red: 0, green: 0, blue: 0).color()
+    @Published var backgroundColorEnabled: Bool = false
+    var shadowColor: RgbColor = .init(red: 0, green: 0, blue: 0)
+    @Published var shadowColorColor: Color = RgbColor(red: 0, green: 0, blue: 0).color()
+    @Published var shadowColorEnabled: Bool = true
+    @Published var boldUsername: Bool = true
+    @Published var boldMessage: Bool = true
+    @Published var badges: Bool = true
+    let nicknames: SettingsChatNicknames = .init()
+    @Published var displayStyle: SettingsChatDisplayStyle = .internationalNameAndUsername
+    @Published var sharedChatIcons: Bool = false
+    @Published var height: Float = 1
+
+    enum CodingKeys: CodingKey {
+        case id,
+             fontSize,
+             usernameColor,
+             messageColor,
+             backgroundColor,
+             backgroundColorEnabled,
+             shadowColor,
+             shadowColorEnabled,
+             boldUsername,
+             boldMessage,
+             badges,
+             displayStyle,
+             sharedChatIcons,
+             height
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.fontSize, fontSize)
+        try container.encode(.usernameColor, usernameColor)
+        try container.encode(.messageColor, messageColor)
+        try container.encode(.backgroundColor, backgroundColor)
+        try container.encode(.backgroundColorEnabled, backgroundColorEnabled)
+        try container.encode(.shadowColor, shadowColor)
+        try container.encode(.shadowColorEnabled, shadowColorEnabled)
+        try container.encode(.boldUsername, boldUsername)
+        try container.encode(.boldMessage, boldMessage)
+        try container.encode(.badges, badges)
+        try container.encode(.displayStyle, displayStyle)
+        try container.encode(.sharedChatIcons, sharedChatIcons)
+        try container.encode(.height, height)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        fontSize = container.decode(.fontSize, Float.self, 19.0)
+        usernameColor = container.decode(.usernameColor, RgbColor.self, .init(red: 255, green: 163, blue: 0))
+        usernameColorColor = usernameColor.color()
+        messageColor = container.decode(.messageColor, RgbColor.self, .init(red: 255, green: 255, blue: 255))
+        messageColorColor = messageColor.color()
+        backgroundColor = container.decode(.backgroundColor, RgbColor.self, .init(red: 0, green: 0, blue: 0))
+        backgroundColorColor = backgroundColor.color()
+        backgroundColorEnabled = container.decode(.backgroundColorEnabled, Bool.self, false)
+        shadowColor = container.decode(.shadowColor, RgbColor.self, .init(red: 0, green: 0, blue: 0))
+        shadowColorColor = shadowColor.color()
+        shadowColorEnabled = container.decode(.shadowColorEnabled, Bool.self, true)
+        boldUsername = container.decode(.boldUsername, Bool.self, true)
+        boldMessage = container.decode(.boldMessage, Bool.self, true)
+        badges = container.decode(.badges, Bool.self, true)
+        displayStyle = container.decode(.displayStyle, SettingsChatDisplayStyle.self, .internationalName)
+        sharedChatIcons = container.decode(.sharedChatIcons, Bool.self, false)
+        height = container.decode(.height, Float.self, 1)
+    }
+
+    func update(other: SettingsWidgetChat) {
+        fontSize = other.fontSize
+        usernameColor = other.usernameColor
+        usernameColorColor = other.usernameColorColor
+        messageColor = other.messageColor
+        messageColorColor = other.messageColorColor
+        backgroundColor = other.backgroundColor
+        backgroundColorColor = other.backgroundColorColor
+        backgroundColorEnabled = other.backgroundColorEnabled
+        shadowColor = other.shadowColor
+        shadowColorColor = other.shadowColorColor
+        shadowColorEnabled = other.shadowColorEnabled
+        boldUsername = other.boldUsername
+        boldMessage = other.boldMessage
+        badges = other.badges
+        displayStyle = other.displayStyle
+        sharedChatIcons = other.sharedChatIcons
+        height = other.height
+    }
+}
+
+class SettingsWidgetSlideshowSlide: Codable, ObservableObject, Identifiable {
+    var id: UUID = .init()
+    @Published var widgetId: UUID?
+    @Published var time: Int = 15
+
+    enum CodingKeys: CodingKey {
+        case id,
+             widgetId,
+             time
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.widgetId, widgetId)
+        try container.encode(.time, time)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        widgetId = container.decode(.widgetId, UUID.self, .init())
+        time = container.decode(.time, Int.self, .init())
+    }
+}
+
+class SettingsWidgetSlideshow: Codable, ObservableObject {
+    var id: UUID = .init()
+    @Published var slides: [SettingsWidgetSlideshowSlide] = []
+
+    enum CodingKeys: CodingKey {
+        case id,
+             slides
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.slides, slides)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        slides = container.decode(.slides, [SettingsWidgetSlideshowSlide].self, [])
+    }
+}
+
+class SettingsWidgetWheelOfLuckOption: Codable, ObservableObject, Identifiable, Equatable {
+    var id: UUID = .init()
+    @Published var text: String = ""
+    @Published var weight: Int = 1
+
+    static func == (lhs: SettingsWidgetWheelOfLuckOption, rhs: SettingsWidgetWheelOfLuckOption) -> Bool {
+        return lhs.id == rhs.id
+    }
+
+    enum CodingKeys: CodingKey {
+        case id,
+             text,
+             weight
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.text, text)
+        try container.encode(.weight, weight)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        text = container.decode(.text, String.self, "")
+        weight = container.decode(.weight, Int.self, 1)
+    }
+}
+
+class SettingsWidgetWheelOfLuck: Codable, ObservableObject {
+    @Published var advanced: Bool = false
+    @Published var totalWeight: Int = 1
+    @Published var options: [SettingsWidgetWheelOfLuckOption] = []
+    @Published var text: String = ""
+
+    enum CodingKeys: CodingKey {
+        case advanced,
+             options
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.advanced, advanced)
+        try container.encode(.options, options)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        advanced = container.decode(.advanced, Bool.self, false)
+        options = container.decode(.options, [SettingsWidgetWheelOfLuckOption].self, [])
+        updateText()
+        updateTotalWeight()
+    }
+
+    func updateTotalWeight() {
+        totalWeight = max(options.reduce(0) { $0 + $1.weight }, 1)
+    }
+
+    func updateText() {
+        text = optionsToText()
+    }
+
+    func shuffle() {
+        options.shuffle()
+        updateText()
+    }
+
+    func optionsFromText(text: String) {
+        options.removeAll()
+        for line in text.trim().split(separator: "\n", omittingEmptySubsequences: false) {
+            let option = SettingsWidgetWheelOfLuckOption()
+            option.text = line.trim()
+            options.append(option)
+        }
+        if options.isEmpty {
+            options.append(SettingsWidgetWheelOfLuckOption())
+        }
+        updateTotalWeight()
+    }
+
+    private func optionsToText() -> String {
+        return options.map { $0.text }.joined(separator: "\n")
+    }
+}
+
+struct SettingsBingoCardSquare: Codable, Identifiable {
+    var id: UUID = .init()
+    var text: String
+    var checked: Bool
+}
+
+class SettingsWidgetBingoCard: Codable, ObservableObject {
+    static let baseBackgroundColor = RgbColor.black.withOpacity(opacity: 0.75)
+    static let baseForegroundColor = RgbColor.white
+    var backgroundColor: RgbColor = baseBackgroundColor
+    @Published var backgroundColorColor: Color = baseBackgroundColor.color()
+    var foregroundColor: RgbColor = baseForegroundColor
+    @Published var foregroundColorColor: Color = baseForegroundColor.color()
+    @Published var squares: [SettingsBingoCardSquare] = []
+    @Published var squaresText: String = ""
+
+    enum CodingKeys: CodingKey {
+        case backgroundColor,
+             foregroundColor,
+             squares
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.backgroundColor, backgroundColor)
+        try container.encode(.foregroundColor, foregroundColor)
+        try container.encode(.squares, squares)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        backgroundColor = container.decode(.backgroundColor, RgbColor.self, Self.baseBackgroundColor)
+        backgroundColorColor = backgroundColor.color()
+        foregroundColor = container.decode(.foregroundColor, RgbColor.self, Self.baseForegroundColor)
+        foregroundColorColor = foregroundColor.color()
+        squares = container.decode(.squares, [SettingsBingoCardSquare].self, [])
+        squaresText = squares.map { $0.text }.joined(separator: "\n")
+    }
+
+    func update(other: SettingsWidgetBingoCard) {
+        backgroundColorColor = other.backgroundColorColor
+        foregroundColorColor = other.foregroundColorColor
+        squares = other.squares
+    }
+
+    func squaresTextChanged() {
+        let lines = squaresText.split(separator: "\n", omittingEmptySubsequences: false)
+        squares.truncate(length: lines.count, create: { .init(text: "", checked: false) })
+        for (index, line) in lines.enumerated() {
+            squares[index].text = line.trim()
+        }
+    }
+
+    func uncheckAll() {
+        squares = squares.map { .init(text: $0.text, checked: false) }
+    }
+
+    func size() -> Int {
+        if squares.count <= 4 {
+            return 2
+        } else if squares.count <= 9 {
+            return 3
+        } else if squares.count <= 16 {
+            return 4
+        } else {
+            return 5
+        }
+    }
+}
+
+class SettingsWidget: Codable, Identifiable, Equatable, ObservableObject, Named {
+    static let baseName = String(localized: "My widget")
+    @Published var name: String
+    var id: UUID = .init()
+    @Published var type: SettingsWidgetType = .text
+    var text: SettingsWidgetText = .init()
+    var browser: SettingsWidgetBrowser = .init()
+    var crop: SettingsWidgetCrop = .init()
+    var map: SettingsWidgetMap = .init()
+    var scene: SettingsWidgetScene = .init()
+    var qrCode: SettingsWidgetQrCode = .init()
+    var alerts: SettingsWidgetAlerts = .init()
+    var videoSource: SettingsWidgetVideoSource = .init()
+    var scoreboard: SettingsWidgetScoreboard = .init()
+    var vTuber: SettingsWidgetVTuber = .init()
+    var pngTuber: SettingsWidgetPngTuber = .init()
+    var snapshot: SettingsWidgetSnapshot = .init()
+    var chat: SettingsWidgetChat = .init()
+    var slideshow: SettingsWidgetSlideshow = .init()
+    var wheelOfLuck: SettingsWidgetWheelOfLuck = .init()
+    var bingoCard: SettingsWidgetBingoCard = .init()
+    @Published var enabled: Bool = true
+    @Published var effects: [SettingsVideoEffect] = []
+
+    init(name: String) {
+        self.name = name
+    }
+
+    static func == (lhs: SettingsWidget, rhs: SettingsWidget) -> Bool {
+        return lhs.id == rhs.id
+    }
+
+    enum CodingKeys: CodingKey {
+        case name,
+             id,
+             type,
+             text,
+             browser,
+             crop,
+             map,
+             scene,
+             qrCode,
+             alerts,
+             videoSource,
+             scoreboard,
+             vTuber,
+             pngTuber,
+             snapshot,
+             chat,
+             slideshow,
+             wheelOfLuck,
+             bingoCard,
+             enabled,
+             effects
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.name, name)
+        try container.encode(.id, id)
+        try container.encode(.type, type)
+        try container.encode(.text, text)
+        try container.encode(.browser, browser)
+        try container.encode(.crop, crop)
+        try container.encode(.map, map)
+        try container.encode(.scene, scene)
+        try container.encode(.qrCode, qrCode)
+        try container.encode(.alerts, alerts)
+        try container.encode(.videoSource, videoSource)
+        try container.encode(.scoreboard, scoreboard)
+        try container.encode(.vTuber, vTuber)
+        try container.encode(.pngTuber, pngTuber)
+        try container.encode(.snapshot, snapshot)
+        try container.encode(.chat, chat)
+        try container.encode(.slideshow, slideshow)
+        try container.encode(.wheelOfLuck, wheelOfLuck)
+        try container.encode(.bingoCard, bingoCard)
+        try container.encode(.enabled, enabled)
+        try container.encode(.effects, effects)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = container.decode(.name, String.self, "")
+        id = container.decode(.id, UUID.self, .init())
+        type = container.decode(.type, SettingsWidgetType.self, .text)
+        text = container.decode(.text, SettingsWidgetText.self, .init())
+        browser = container.decode(.browser, SettingsWidgetBrowser.self, .init())
+        crop = container.decode(.crop, SettingsWidgetCrop.self, .init())
+        map = container.decode(.map, SettingsWidgetMap.self, .init())
+        scene = container.decode(.scene, SettingsWidgetScene.self, .init())
+        qrCode = container.decode(.qrCode, SettingsWidgetQrCode.self, .init())
+        alerts = container.decode(.alerts, SettingsWidgetAlerts.self, .init())
+        videoSource = container.decode(.videoSource, SettingsWidgetVideoSource.self, .init())
+        scoreboard = container.decode(.scoreboard, SettingsWidgetScoreboard.self, .init())
+        vTuber = container.decode(.vTuber, SettingsWidgetVTuber.self, .init())
+        pngTuber = container.decode(.pngTuber, SettingsWidgetPngTuber.self, .init())
+        snapshot = container.decode(.snapshot, SettingsWidgetSnapshot.self, .init())
+        chat = container.decode(.chat, SettingsWidgetChat.self, .init())
+        slideshow = container.decode(.slideshow, SettingsWidgetSlideshow.self, .init())
+        wheelOfLuck = container.decode(.wheelOfLuck, SettingsWidgetWheelOfLuck.self, .init())
+        bingoCard = container.decode(.bingoCard, SettingsWidgetBingoCard.self, .init())
+        enabled = container.decode(.enabled, Bool.self, true)
+        effects = container.decode(.effects, [SettingsVideoEffect].self, [])
+        migrateFromOlderVersions()
+    }
+
+    private func migrateFromOlderVersions() {
+        if type == .videoSource, !effects.contains(where: { $0.type == .shape }) {
+            let shape = SettingsVideoEffectShape()
+            shape.cornerRadius = 0
+            var updated = false
+            if videoSource.cornerRadius != 0 || videoSource.borderWidth != 0 {
+                shape.cornerRadius = videoSource.cornerRadius
+                shape.borderWidth = videoSource.borderWidth
+                shape.borderColor = videoSource.borderColor
+                shape.borderColorColor = videoSource.borderColorColor
+                updated = true
+                videoSource.cornerRadius = 0
+                videoSource.borderWidth = 0
+            }
+            if videoSource.cropEnabled, !videoSource.trackFaceEnabled {
+                shape.cropEnabled = videoSource.cropEnabled
+                shape.cropX = videoSource.cropX
+                shape.cropY = videoSource.cropY
+                shape.cropWidth = videoSource.cropWidth
+                shape.cropHeight = videoSource.cropHeight
+                updated = true
+                videoSource.cropEnabled = false
+            }
+            if updated {
+                let effect = SettingsVideoEffect()
+                effect.type = .shape
+                effect.shape = shape
+                effects.append(effect)
+            }
+        }
+    }
+
+    func getEffects(model: Model) -> [VideoEffect] {
+        return effects.filter { $0.enabled }.map { $0.getEffect(model: model) }
+    }
+
+    func image() -> String {
+        return type.image()
+    }
+
+    func hasPosition() -> Bool {
+        return [
+            .image,
+            .browser,
+            .text,
+            .crop,
+            .map,
+            .qrCode,
+            .alerts,
+            .videoSource,
+            .vTuber,
+            .pngTuber,
+            .snapshot,
+            .chat,
+            .slideshow,
+            .scoreboard,
+            .wheelOfLuck,
+            .bingoCard,
+        ].contains(type)
+    }
+
+    func hasSize() -> Bool {
+        return [
+            .image,
+            .browser,
+            .crop,
+            .map,
+            .qrCode,
+            .videoSource,
+            .vTuber,
+            .pngTuber,
+            .snapshot,
+            .slideshow,
+            .bingoCard,
+        ].contains(type)
+    }
+
+    func hasAlignment() -> Bool {
+        return [
+            .image,
+            .browser,
+            .text,
+            .crop,
+            .map,
+            .qrCode,
+            .videoSource,
+            .vTuber,
+            .pngTuber,
+            .snapshot,
+            .chat,
+            .slideshow,
+            .scoreboard,
+            .wheelOfLuck,
+            .bingoCard,
+        ].contains(type)
+    }
+}
+
+struct SettingsWidgetLayout {
+    var x: Double = 0.0
+    var xString: String = "0.0"
+    var y: Double = 0.0
+    var yString: String = "0.0"
+    var size: Double = 100.0
+    var sizeString: String = "100.0"
+    var alignment: SettingsAlignment = .topLeft
+    var positioningLock: Bool = false
+
+    mutating func updateXString() {
+        xString = String(x)
+    }
+
+    mutating func updateYString() {
+        yString = String(y)
+    }
+
+    mutating func updateSizeString() {
+        sizeString = String(size)
+    }
+
+    func extent() -> CGRect {
+        return .init(x: x, y: y, width: size, height: size)
+    }
+}
+
+class SettingsSceneWidget: Codable, Identifiable, Equatable, ObservableObject {
+    static func == (lhs: SettingsSceneWidget, rhs: SettingsSceneWidget) -> Bool {
+        return lhs.id == rhs.id
+    }
+
+    var id: UUID = .init()
+    @Published var widgetId: UUID
+    @Published var layout: SettingsWidgetLayout = .init()
+    // To be removed.
+    @Published var width2: Double = 100.0
+    // To be removed.
+    @Published var height2: Double = 100.0
+    var migrated: Bool = true
+    var migrated2: Bool = true
+
+    init(widgetId: UUID) {
+        self.widgetId = widgetId
+    }
+
+    enum CodingKeys: CodingKey {
+        case widgetId,
+             id,
+             x,
+             y,
+             width,
+             height,
+             size,
+             alignment,
+             positioningLock,
+             migrated,
+             migrated2
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.widgetId, widgetId)
+        try container.encode(.id, id)
+        try container.encode(.x, layout.x)
+        try container.encode(.y, layout.y)
+        try container.encode(.width, width2)
+        try container.encode(.height, height2)
+        try container.encode(.size, layout.size)
+        try container.encode(.alignment, layout.alignment)
+        try container.encode(.positioningLock, layout.positioningLock)
+        try container.encode(.migrated, migrated)
+        try container.encode(.migrated2, migrated2)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        widgetId = container.decode(.widgetId, UUID.self, .init())
+        id = container.decode(.id, UUID.self, .init())
+        layout.x = container.decode(.x, Double.self, 0.0)
+        layout.updateXString()
+        layout.y = container.decode(.y, Double.self, 0.0)
+        layout.updateYString()
+        width2 = container.decode(.width, Double.self, 100.0)
+        height2 = container.decode(.height, Double.self, 100.0)
+        if let size = container.decode(.size, Double?.self, nil) {
+            layout.size = size
+        } else {
+            layout.size = container.decode(.size, Double.self, min(width2, height2))
+        }
+        layout.updateSizeString()
+        layout.alignment = container.decode(.alignment, SettingsAlignment.self, .topLeft)
+        layout.positioningLock = container.decode(.positioningLock, Bool.self, false)
+        migrated = container.decode(.migrated, Bool.self, false)
+        migrated2 = container.decode(.migrated2, Bool.self, false)
+    }
+
+    func clone() -> SettingsSceneWidget {
+        let new = SettingsSceneWidget(widgetId: widgetId)
+        new.layout = layout
+        new.migrated = migrated
+        new.migrated2 = migrated2
+        return new
+    }
+}
+
+enum SettingsSceneCameraPosition: String, Codable, CaseIterable {
+    case back = "Back"
+    case front = "Front"
+    case rtmp = "RTMP"
+    case external = "External"
+    case srtla = "SRT(LA)"
+    case rist = "RIST"
+    case rtsp = "RTSP"
+    case whip = "WHIP"
+    case whep = "WHEP"
+    case mediaPlayer = "Media player"
+    case screenCapture = "Screen capture"
+    case backTripleLowEnergy = "Back triple"
+    case backDualLowEnergy = "Back dual"
+    case backWideDualLowEnergy = "Back wide dual"
+    case none = "None"
+
+    init(from decoder: Decoder) throws {
+        self = try SettingsSceneCameraPosition(rawValue: decoder.singleValueContainer()
+            .decode(RawValue.self)) ?? .back
+    }
+
+    func isBuiltin() -> Bool {
+        return builtinCameraPositions.contains(self)
+    }
+}
+
+private let builtinCameraPositions: [SettingsSceneCameraPosition] = [
+    .back,
+    .front,
+    .backTripleLowEnergy,
+    .backDualLowEnergy,
+    .backWideDualLowEnergy,
+]
+
+struct SettingsVideoSource {
+    var cameraPosition: SettingsSceneCameraPosition = .screenCapture
+    var backCameraId: CameraId = bestBackCameraId
+    var frontCameraId: CameraId = bestFrontCameraId
+    var rtmpCameraId: UUID = .init()
+    var srtlaCameraId: UUID = .init()
+    var ristCameraId: UUID = .init()
+    var rtspCameraId: UUID = .init()
+    var whipCameraId: UUID = .init()
+    var whepCameraId: UUID = .init()
+    var mediaPlayerCameraId: UUID = .init()
+    var externalCameraId: CameraId = ""
+    var externalCameraName: String = ""
+
+    func toCameraId() -> SettingsCameraId {
+        switch cameraPosition {
+        case .back:
+            return .back(id: backCameraId)
+        case .front:
+            return .front(id: frontCameraId)
+        case .rtmp:
+            return .rtmp(id: rtmpCameraId)
+        case .external:
+            return .external(id: externalCameraId, name: externalCameraName)
+        case .srtla:
+            return .srtla(id: srtlaCameraId)
+        case .rist:
+            return .rist(id: ristCameraId)
+        case .rtsp:
+            return .rtsp(id: rtspCameraId)
+        case .whip:
+            return .whip(id: whipCameraId)
+        case .whep:
+            return .whep(id: whepCameraId)
+        case .mediaPlayer:
+            return .mediaPlayer(id: mediaPlayerCameraId)
+        case .screenCapture:
+            return .screenCapture
+        case .backTripleLowEnergy:
+            return .backTripleLowEnergy
+        case .backDualLowEnergy:
+            return .backDualLowEnergy
+        case .backWideDualLowEnergy:
+            return .backWideDualLowEnergy
+        case .none:
+            return .none
+        }
+    }
+
+    mutating func updateCameraId(settingsCameraId: SettingsCameraId) {
+        switch settingsCameraId {
+        case let .back(id: id):
+            cameraPosition = .back
+            backCameraId = id
+        case let .front(id: id):
+            cameraPosition = .front
+            frontCameraId = id
+        case let .rtmp(id: id):
+            cameraPosition = .rtmp
+            rtmpCameraId = id
+        case let .srtla(id: id):
+            cameraPosition = .srtla
+            srtlaCameraId = id
+        case let .rist(id: id):
+            cameraPosition = .rist
+            ristCameraId = id
+        case let .rtsp(id: id):
+            cameraPosition = .rtsp
+            rtspCameraId = id
+        case let .whip(id: id):
+            cameraPosition = .whip
+            whipCameraId = id
+        case let .whep(id: id):
+            cameraPosition = .whep
+            whepCameraId = id
+        case let .mediaPlayer(id: id):
+            cameraPosition = .mediaPlayer
+            mediaPlayerCameraId = id
+        case let .external(id: id, name: name):
+            cameraPosition = .external
+            externalCameraId = id
+            externalCameraName = name
+        case .screenCapture:
+            cameraPosition = .screenCapture
+        case .backTripleLowEnergy:
+            cameraPosition = .backTripleLowEnergy
+        case .backDualLowEnergy:
+            cameraPosition = .backDualLowEnergy
+        case .backWideDualLowEnergy:
+            cameraPosition = .backWideDualLowEnergy
+        case .none:
+            cameraPosition = .none
+        }
+    }
+
+    func isCaptureDevice() -> Bool {
+        switch cameraPosition {
+        case .back:
+            return true
+        case .backWideDualLowEnergy:
+            return true
+        case .backDualLowEnergy:
+            return true
+        case .backTripleLowEnergy:
+            return true
+        case .front:
+            return true
+        case .external:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func getCaptureDeviceCameraId() -> CameraId? {
+        switch cameraPosition {
+        case .back:
+            return backCameraId
+        case .front:
+            return frontCameraId
+        case .external:
+            return externalCameraId
+        default:
+            return nil
+        }
+    }
+
+    func isNetwork(cameraId: UUID) -> Bool {
+        switch cameraPosition {
+        case .rtmp:
+            return cameraId == rtmpCameraId
+        case .srtla:
+            return cameraId == srtlaCameraId
+        case .rist:
+            return cameraId == ristCameraId
+        case .rtsp:
+            return cameraId == rtspCameraId
+        case .whip:
+            return cameraId == whipCameraId
+        case .whep:
+            return cameraId == whepCameraId
+        default:
+            return false
+        }
+    }
+}
+
+class SettingsWidgetVideoSource: Codable, ObservableObject {
+    @Published var cornerRadius: Float = 0
+    @Published var videoSource: SettingsVideoSource = .init()
+    var cropEnabled: Bool = false
+    var cropX: Double = 0.25
+    var cropY: Double = 0.0
+    var cropWidth: Double = 0.5
+    var cropHeight: Double = 1.0
+    @Published var rotation: Double = 0.0
+    var trackFaceEnabled: Bool = false
+    @Published var trackFaceZoom: Double = 0.75
+    var mirror: Bool = false
+    @Published var borderWidth: Double = 0
+    var borderColor: RgbColor = .init(red: 0, green: 0, blue: 0)
+    @Published var borderColorColor: Color = .clear
+
+    enum CodingKeys: CodingKey {
+        case cornerRadius,
+             cameraPosition,
+             backCameraId,
+             frontCameraId,
+             rtmpCameraId,
+             srtlaCameraId,
+             ristCameraId,
+             rtspCameraId,
+             whipCameraId,
+             whepCameraId,
+             mediaPlayerCameraId,
+             externalCameraId,
+             externalCameraName,
+             cropEnabled,
+             cropX,
+             cropY,
+             cropWidth,
+             cropHeight,
+             rotation,
+             trackFaceEnabled,
+             trackFaceZoom,
+             mirror,
+             borderWidth,
+             borderColor
+    }
+
+    init() {
+        borderColorColor = borderColor.color()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.cornerRadius, cornerRadius)
+        try container.encode(.cameraPosition, videoSource.cameraPosition)
+        try container.encode(.backCameraId, videoSource.backCameraId)
+        try container.encode(.frontCameraId, videoSource.frontCameraId)
+        try container.encode(.rtmpCameraId, videoSource.rtmpCameraId)
+        try container.encode(.srtlaCameraId, videoSource.srtlaCameraId)
+        try container.encode(.ristCameraId, videoSource.ristCameraId)
+        try container.encode(.rtspCameraId, videoSource.rtspCameraId)
+        try container.encode(.whipCameraId, videoSource.whipCameraId)
+        try container.encode(.whepCameraId, videoSource.whepCameraId)
+        try container.encode(.mediaPlayerCameraId, videoSource.mediaPlayerCameraId)
+        try container.encode(.externalCameraId, videoSource.externalCameraId)
+        try container.encode(.externalCameraName, videoSource.externalCameraName)
+        try container.encode(.cropEnabled, cropEnabled)
+        try container.encode(.cropX, cropX)
+        try container.encode(.cropY, cropY)
+        try container.encode(.cropWidth, cropWidth)
+        try container.encode(.cropHeight, cropHeight)
+        try container.encode(.rotation, rotation)
+        try container.encode(.trackFaceEnabled, trackFaceEnabled)
+        try container.encode(.trackFaceZoom, trackFaceZoom)
+        try container.encode(.mirror, mirror)
+        try container.encode(.borderWidth, borderWidth)
+        try container.encode(.borderColor, borderColor)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cornerRadius = container.decode(.cornerRadius, Float.self, 0)
+        videoSource.cameraPosition = decodeCameraPosition(container, .cameraPosition, .screenCapture)
+        videoSource.backCameraId = decodeCameraId(container, .backCameraId, bestBackCameraId)
+        videoSource.frontCameraId = decodeCameraId(container, .frontCameraId, bestFrontCameraId)
+        videoSource.rtmpCameraId = container.decode(.rtmpCameraId, UUID.self, .init())
+        videoSource.srtlaCameraId = container.decode(.srtlaCameraId, UUID.self, .init())
+        videoSource.ristCameraId = container.decode(.ristCameraId, UUID.self, .init())
+        videoSource.rtspCameraId = container.decode(.rtspCameraId, UUID.self, .init())
+        videoSource.whipCameraId = container.decode(.whipCameraId, UUID.self, .init())
+        videoSource.whepCameraId = container.decode(.whepCameraId, UUID.self, .init())
+        videoSource.mediaPlayerCameraId = container.decode(.mediaPlayerCameraId, UUID.self, .init())
+        videoSource.externalCameraId = container.decode(.externalCameraId, String.self, "")
+        videoSource.externalCameraName = container.decode(.externalCameraName, String.self, "")
+        cropEnabled = container.decode(.cropEnabled, Bool.self, false)
+        cropX = container.decode(.cropX, Double.self, 0.25)
+        cropY = container.decode(.cropY, Double.self, 0.0)
+        cropWidth = container.decode(.cropWidth, Double.self, 0.5)
+        cropHeight = container.decode(.cropHeight, Double.self, 1.0)
+        rotation = container.decode(.rotation, Double.self, 0.0)
+        trackFaceEnabled = container.decode(.trackFaceEnabled, Bool.self, false)
+        trackFaceZoom = container.decode(.trackFaceZoom, Double.self, 0.75)
+        mirror = container.decode(.mirror, Bool.self, false)
+        borderWidth = container.decode(.borderWidth, Double.self, 0)
+        borderColor = container.decode(.borderColor, RgbColor.self, .init(red: 0, green: 0, blue: 0))
+        borderColorColor = borderColor.color()
+    }
+
+    func toEffectSettings() -> VideoSourceEffectSettings {
+        return .init(rotation: rotation,
+                     trackFaceEnabled: trackFaceEnabled,
+                     trackFaceZoom: 1.5 + (1 - trackFaceZoom) * 4,
+                     mirror: mirror)
+    }
+
+    func toCameraId() -> SettingsCameraId {
+        return videoSource.toCameraId()
+    }
+
+    func updateCameraId(settingsCameraId: SettingsCameraId) {
+        videoSource.updateCameraId(settingsCameraId: settingsCameraId)
+    }
+}
+
+enum SettingsWidgetScoreboardSport: String, Codable, CaseIterable {
+    case generic
+    case padel
+    case basketball
+    case generic2
+    case genericSets
+    case hockey
+    case football
+    case tennis
+    case volleyball
+
+    func toString() -> String {
+        switch self {
+        case .generic:
+            return String(localized: "Generic")
+        case .padel:
+            return String(localized: "Padel")
+        case .basketball:
+            return String(localized: "Basketball")
+        case .generic2:
+            return String(localized: "Generic 2")
+        case .genericSets:
+            return String(localized: "Generic sets")
+        case .hockey:
+            return String(localized: "Hockey")
+        case .football:
+            return String(localized: "Football")
+        case .tennis:
+            return String(localized: "Tennis")
+        case .volleyball:
+            return String(localized: "Volleyball")
+        }
+    }
+}
+
+enum SettingsWidgetScoreboardLayout: Codable, CaseIterable {
+    case stacked
+    case stackedInline
+    case sideBySide
+    case stackHistory
+
+    func toString() -> String {
+        switch self {
+        case .stacked:
+            return String(localized: "Stacked")
+        case .stackedInline:
+            return String(localized: "Stacked inline")
+        case .sideBySide:
+            return String(localized: "Side by side")
+        case .stackHistory:
+            return String(localized: "Stack history")
+        }
+    }
+}
+
+class SettingsWidgetScoreboardPlayer: Codable, Identifiable, ObservableObject, Named {
+    static let baseName = String(localized: "🇸🇪 Moblin")
+    var id: UUID = .init()
+    @Published var name: String = baseName
+
+    enum CodingKeys: CodingKey {
+        case id,
+             name
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.name, name)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        name = container.decode(.name, String.self, Self.baseName)
+    }
+}
+
+class SettingsWidgetScoreboardScore: Codable, Identifiable {
+    var home: Int = 0
+    var away: Int = 0
+}
+
+enum SettingsWidgetPadelScoreboardGameType: String, Codable, CaseIterable {
+    case doubles = "Double"
+    case singles = "Single"
+
+    func toString() -> String {
+        switch self {
+        case .doubles:
+            return String(localized: "Doubles")
+        case .singles:
+            return String(localized: "Singles")
+        }
+    }
+}
+
+enum SettingsWidgetScoreboardScoreIncrement {
+    case home
+    case away
+}
+
+class SettingsWidgetPadelScoreboard: Codable, ObservableObject {
+    @Published var type: SettingsWidgetPadelScoreboardGameType = .doubles
+    @Published var homePlayer1: UUID = .init()
+    @Published var homePlayer2: UUID = .init()
+    @Published var awayPlayer1: UUID = .init()
+    @Published var awayPlayer2: UUID = .init()
+    var score: [SettingsWidgetScoreboardScore] = [.init()]
+    var scoreChanges: [SettingsWidgetScoreboardScoreIncrement] = []
+
+    enum CodingKeys: CodingKey {
+        case type,
+             homePlayer1,
+             homePlayer2,
+             awayPlayer1,
+             awayPlayer2,
+             score
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.type, type)
+        try container.encode(.homePlayer1, homePlayer1)
+        try container.encode(.homePlayer2, homePlayer2)
+        try container.encode(.awayPlayer1, awayPlayer1)
+        try container.encode(.awayPlayer2, awayPlayer2)
+        try container.encode(.score, score)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = container.decode(.type, SettingsWidgetPadelScoreboardGameType.self, .doubles)
+        homePlayer1 = container.decode(.homePlayer1, UUID.self, .init())
+        homePlayer2 = container.decode(.homePlayer2, UUID.self, .init())
+        awayPlayer1 = container.decode(.awayPlayer1, UUID.self, .init())
+        awayPlayer2 = container.decode(.awayPlayer2, UUID.self, .init())
+        score = container.decode(.score, [SettingsWidgetScoreboardScore].self, [.init()])
+    }
+}
+
+enum SettingsWidgetGenericScoreboardClockDirection: Codable, CaseIterable {
+    case up
+    case down
+
+    func toString() -> String {
+        switch self {
+        case .up:
+            return String(localized: "Up")
+        case .down:
+            return String(localized: "Down")
+        }
+    }
+}
+
+class SettingsWidgetGenericScoreboard: Codable, ObservableObject {
+    static let baseName = String(localized: "🇸🇪 Moblin")
+    static let baseTitle = "⚽️"
+    @Published var home: String = baseName
+    @Published var away: String = baseName
+    @Published var title: String = baseTitle
+    @Published var period: String = "1"
+    var clock: SettingsWidgetScoreboardClock = .init()
+    var score: SettingsWidgetScoreboardScore = .init()
+    var scoreChanges: [SettingsWidgetScoreboardScoreIncrement] = []
+
+    enum CodingKeys: CodingKey {
+        case home,
+             away,
+             title,
+             period,
+             clock
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.home, home)
+        try container.encode(.away, away)
+        try container.encode(.title, title)
+        try container.encode(.period, period)
+        try container.encode(.clock, clock)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        home = container.decode(.home, String.self, Self.baseName)
+        away = container.decode(.away, String.self, Self.baseName)
+        title = container.decode(.title, String.self, Self.baseTitle)
+        period = container.decode(.period, String.self, "1")
+        clock = container.decode(.clock, SettingsWidgetScoreboardClock.self, .init())
+    }
+}
+
+class SettingsWidgetModularScoreboardTeam: Codable, ObservableObject {
+    @Published var name: String = ""
+    var textColor: RgbColor = .black
+    @Published var textColorColor: Color = .clear
+    var backgroundColor: RgbColor = .black
+    @Published var backgroundColorColor: Color = .clear
+
+    enum CodingKeys: CodingKey {
+        case name,
+             textColor,
+             backgroundColor
+    }
+
+    init(name: String, textColor: RgbColor, backgroundColor: RgbColor) {
+        self.name = name
+        self.textColor = textColor
+        self.backgroundColor = backgroundColor
+        loadColors()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.name, name)
+        try container.encode(.textColor, textColor)
+        try container.encode(.backgroundColor, backgroundColor)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = container.decode(.name, String.self, "")
+        textColor = container.decode(.textColor, RgbColor.self, .black)
+        backgroundColor = container.decode(.backgroundColor, RgbColor.self, .black)
+        loadColors()
+    }
+
+    func setHexColors(_ textColor: String, _ backgroundColor: String) {
+        if let color = RgbColor.fromHex(string: textColor) {
+            self.textColor = color
+        }
+        if let color = RgbColor.fromHex(string: backgroundColor) {
+            self.backgroundColor = color
+        }
+        loadColors()
+    }
+
+    func loadColors() {
+        textColorColor = textColor.color()
+        backgroundColorColor = backgroundColor.color()
+    }
+}
+
+class SettingsWidgetScoreboardClock: Codable, ObservableObject {
+    @Published var maximum: Int = 45
+    @Published var direction: SettingsWidgetGenericScoreboardClockDirection = .up
+    var minutes: Int = 0
+    var seconds: Int = 0
+    @Published var isStopped: Bool = true
+
+    enum CodingKeys: CodingKey {
+        case maximum,
+             direction
+    }
+
+    init() {
+        reset()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.maximum, maximum)
+        try container.encode(.direction, direction)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        maximum = container.decode(.maximum, Int.self, 45)
+        direction = container.decode(.direction,
+                                     SettingsWidgetGenericScoreboardClockDirection.self,
+                                     .up)
+        reset()
+    }
+
+    func format() -> String {
+        if seconds < 10 {
+            return "\(minutes):0\(seconds)"
+        } else {
+            return "\(minutes):\(seconds)"
+        }
+    }
+
+    func tick() {
+        switch direction {
+        case .up:
+            if minutes != maximum {
+                if seconds == 59 {
+                    seconds = 0
+                    minutes += 1
+                } else {
+                    seconds += 1
+                }
+            }
+        case .down:
+            if minutes != 0 || seconds != 0 {
+                if seconds == 0 {
+                    seconds = 59
+                    minutes -= 1
+                } else {
+                    seconds -= 1
+                }
+            }
+        }
+    }
+
+    func reset() {
+        switch direction {
+        case .up:
+            minutes = 0
+            seconds = 0
+        case .down:
+            minutes = maximum
+            seconds = 0
+        }
+    }
+}
+
+class SettingsWidgetModularScoreboard: Codable, ObservableObject {
+    static let baseName = String(localized: "🇸🇪 Moblin")
+    static let baseTitle = "⚽️"
+    static let baseHomeTextColor: RgbColor = .white
+    static let baseHomeBackgroundColor: RgbColor = .init(red: 11, green: 16, blue: 172)
+    static let baseAwayTextColor: RgbColor = .white
+    static let baseAwayBackgroundColor: RgbColor = .init(red: 220, green: 38, blue: 38)
+    @Published var home: SettingsWidgetModularScoreboardTeam = createHomeTeam()
+    @Published var away: SettingsWidgetModularScoreboardTeam = createAwayTeam()
+    @Published var title: String = baseTitle
+    @Published var period: String = "1"
+    @Published var infoBoxText: String = ""
+    var score: SettingsWidgetScoreboardScore = .init()
+    var clock: SettingsWidgetScoreboardClock = .init()
+    @Published var layout: SettingsWidgetScoreboardLayout = .stacked
+    @Published var config: RemoteControlScoreboardMatchConfig?
+    @Published var width: Float = 350
+    @Published var rowHeight: Float = 45
+    @Published var isBold: Bool = true
+    @Published var showTitle: Bool = false
+    @Published var showMoreStats: Bool = false
+    @Published var showGlobalStatsBlock: Bool = false
+
+    enum CodingKeys: CodingKey {
+        case home,
+             away,
+             title,
+             period,
+             infoBoxText,
+             clock,
+             layout,
+             width,
+             rowHeight,
+             isBold,
+             showTitle,
+             stacked,
+             showMoreStats,
+             showGlobalStatsBlock
+    }
+
+    init() {}
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.home, home)
+        try container.encode(.away, away)
+        try container.encode(.title, title)
+        try container.encode(.period, period)
+        try container.encode(.infoBoxText, infoBoxText)
+        try container.encode(.clock, clock)
+        try container.encode(.layout, layout)
+        try container.encode(.width, width)
+        try container.encode(.rowHeight, rowHeight)
+        try container.encode(.isBold, isBold)
+        try container.encode(.showTitle, showTitle)
+        try container.encode(.showMoreStats, showMoreStats)
+        try container.encode(.showGlobalStatsBlock, showGlobalStatsBlock)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        home = container.decode(.home, SettingsWidgetModularScoreboardTeam.self, Self.createHomeTeam())
+        away = container.decode(.away, SettingsWidgetModularScoreboardTeam.self, Self.createAwayTeam())
+        title = container.decode(.title, String.self, Self.baseTitle)
+        period = container.decode(.period, String.self, "1")
+        infoBoxText = container.decode(.infoBoxText, String.self, "")
+        clock = container.decode(.clock, SettingsWidgetScoreboardClock.self, .init())
+        layout = container.decode(.layout, SettingsWidgetScoreboardLayout.self, .stacked)
+        width = container.decode(.width, Float.self, 350)
+        rowHeight = container.decode(.rowHeight, Float.self, 45)
+        isBold = container.decode(.isBold, Bool.self, true)
+        showTitle = container.decode(.showTitle, Bool.self, false)
+        showMoreStats = container.decode(.showMoreStats, Bool.self, false)
+        showGlobalStatsBlock = container.decode(.showGlobalStatsBlock, Bool.self, false)
+    }
+
+    private static func createHomeTeam() -> SettingsWidgetModularScoreboardTeam {
+        return SettingsWidgetModularScoreboardTeam(name: baseName,
+                                                   textColor: baseHomeTextColor,
+                                                   backgroundColor: baseHomeBackgroundColor)
+    }
+
+    private static func createAwayTeam() -> SettingsWidgetModularScoreboardTeam {
+        return SettingsWidgetModularScoreboardTeam(name: baseName,
+                                                   textColor: baseAwayTextColor,
+                                                   backgroundColor: baseAwayBackgroundColor)
+    }
+
+    func fontSize() -> Double {
+        return Double(rowHeight * 0.8)
+    }
+
+    func setLayout(name: String) {
+        switch name {
+        case "sideBySide":
+            layout = .sideBySide
+        case "stackHistory":
+            layout = .stackHistory
+        case "stackedInline":
+            layout = .stackedInline
+        default:
+            layout = .stacked
+        }
+    }
+}
+
+class SettingsWidgetScoreboard: Codable, ObservableObject {
+    static let baseTextColor = RgbColor.white
+    static let basePrimaryBackgroundColor = RgbColor(red: 0x0B, green: 0x10, blue: 0xAC)
+    static let baseSecondaryBackgroundColor = RgbColor(red: 0, green: 3, blue: 0x5B)
+    @Published var sport: SettingsWidgetScoreboardSport = .generic
+    var textColor = baseTextColor
+    @Published var textColorColor: Color = .clear
+    var primaryBackgroundColor = basePrimaryBackgroundColor
+    @Published var primaryBackgroundColorColor: Color = .clear
+    var secondaryBackgroundColor = baseSecondaryBackgroundColor
+    @Published var secondaryBackgroundColorColor: Color = .clear
+    var padel: SettingsWidgetPadelScoreboard = .init()
+    var generic: SettingsWidgetGenericScoreboard = .init()
+    var modular: SettingsWidgetModularScoreboard = .init()
+
+    enum CodingKeys: CodingKey {
+        case type,
+             textColor,
+             primaryBackgroundColor,
+             secondaryBackgroundColor,
+             padel,
+             generic,
+             modular
+    }
+
+    init() {
+        loadColors()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.type, sport)
+        try container.encode(.textColor, textColor)
+        try container.encode(.primaryBackgroundColor, primaryBackgroundColor)
+        try container.encode(.secondaryBackgroundColor, secondaryBackgroundColor)
+        try container.encode(.padel, padel)
+        try container.encode(.generic, generic)
+        try container.encode(.modular, modular)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sport = container.decode(.type, SettingsWidgetScoreboardSport.self, .generic)
+        textColor = container.decode(.textColor, RgbColor.self, Self.baseTextColor)
+        primaryBackgroundColor = container.decode(.primaryBackgroundColor,
+                                                  RgbColor.self,
+                                                  Self.basePrimaryBackgroundColor)
+        secondaryBackgroundColor = container.decode(.secondaryBackgroundColor,
+                                                    RgbColor.self,
+                                                    Self.baseSecondaryBackgroundColor)
+        padel = container.decode(.padel, SettingsWidgetPadelScoreboard.self, .init())
+        generic = container.decode(.generic, SettingsWidgetGenericScoreboard.self, .init())
+        modular = container.decode(.modular, SettingsWidgetModularScoreboard.self, .init())
+        loadColors()
+    }
+
+    func resetColors() {
+        textColor = Self.baseTextColor
+        primaryBackgroundColor = Self.basePrimaryBackgroundColor
+        secondaryBackgroundColor = Self.baseSecondaryBackgroundColor
+        loadColors()
+    }
+
+    func loadColors() {
+        textColorColor = textColor.color()
+        primaryBackgroundColorColor = primaryBackgroundColor.color()
+        secondaryBackgroundColorColor = secondaryBackgroundColor.color()
+    }
+
+    func setModularSport(sportId: String) {
+        switch sportId {
+        case "basketball":
+            sport = .basketball
+        case "generic":
+            sport = .generic2
+        case "generic sets":
+            sport = .genericSets
+        case "hockey":
+            sport = .hockey
+        case "football":
+            sport = .football
+        case "tennis":
+            sport = .tennis
+        case "volleyball":
+            sport = .volleyball
+        default:
+            break
+        }
+    }
+}
+
+enum SettingsWidgetType: String, Codable, CaseIterable {
+    case text = "Text"
+    case browser = "Browser"
+    case videoSource = "Video source"
+    case image = "Image"
+    case alerts = "Alerts"
+    case map = "Map"
+    case snapshot = "Snapshot"
+    case chat = "Chat"
+    case scene = "Scene"
+    case slideshow = "Slideshow"
+    case vTuber = "VTuber"
+    case pngTuber = "PNGTuber"
+    case qrCode = "QR code"
+    case scoreboard = "Scoreboard"
+    case wheelOfLuck = "Wheel of luck"
+    case bingoCard = "Bingo card"
+    case crop = "Crop"
+
+    func toString() -> String {
+        switch self {
+        case .text:
+            return String(localized: "Text")
+        case .browser:
+            return String(localized: "Browser")
+        case .videoSource:
+            return String(localized: "Video source")
+        case .image:
+            return String(localized: "Image")
+        case .alerts:
+            return String(localized: "Alerts")
+        case .map:
+            return String(localized: "Map")
+        case .snapshot:
+            return String(localized: "Snapshot")
+        case .chat:
+            return String(localized: "Chat")
+        case .scene:
+            return String(localized: "Scene")
+        case .slideshow:
+            return String(localized: "Slideshow")
+        case .vTuber:
+            return String(localized: "VTuber")
+        case .pngTuber:
+            return String(localized: "PNGTuber")
+        case .qrCode:
+            return String(localized: "QR code")
+        case .scoreboard:
+            return String(localized: "Scoreboard")
+        case .wheelOfLuck:
+            return String(localized: "Wheel of luck")
+        case .bingoCard:
+            return String(localized: "Bingo card")
+        case .crop:
+            return String(localized: "Crop")
+        }
+    }
+
+    func image() -> String {
+        switch self {
+        case .image:
+            return "photo"
+        case .browser:
+            return "globe"
+        case .text:
+            return "textformat"
+        case .crop:
+            return "crop"
+        case .map:
+            return "map"
+        case .snapshot:
+            return "camera.aperture"
+        case .chat:
+            return "message"
+        case .scene:
+            return "photo.on.rectangle"
+        case .slideshow:
+            return "play.rectangle"
+        case .qrCode:
+            return "qrcode"
+        case .alerts:
+            return "megaphone"
+        case .videoSource:
+            return "video"
+        case .scoreboard:
+            return "rectangle.split.2x1"
+        case .vTuber:
+            return "person.crop.circle"
+        case .pngTuber:
+            return "person.crop.circle.dashed"
+        case .wheelOfLuck:
+            return "burn"
+        case .bingoCard:
+            return "square.grid.3x3.square"
+        }
+    }
+
+    func description() -> String {
+        switch self {
+        case .text:
+            return String(localized: "A text widget shows text, weather, clock and much more.")
+        case .browser:
+            return String(localized: "A browser widget shows a webpage.")
+        case .videoSource:
+            return String(localized: "A video source widget shows another camera or screen capture.")
+        case .image:
+            return String(localized: "An image widget shows an image.")
+        case .alerts:
+            return String(localized: "An alerts widget shows various alerts (subscriptions, raids, ...).")
+        case .map:
+            return String(localized: "A map widget shows a map with your location.")
+        case .snapshot:
+            return String(localized: "A snapshot widget shows snapshots when taken.")
+        case .chat:
+            return String(localized: "A chat widget shows your chat.")
+        case .scene:
+            return String(localized: "A scene widget shows a scene's widgets.")
+        case .slideshow:
+            return String(localized: "A slideshow widget shows a slideshow of widgets.")
+        case .vTuber:
+            return String(
+                localized: "A VTuber widget shows a VTuber model that imitates your facial movements."
+            )
+        case .pngTuber:
+            return String(
+                localized: "A PNGTuber widget shows a PNGTuber model that imitates your facial movements."
+            )
+        case .qrCode:
+            return String(localized: "A QR code widget shows a QR code of any text.")
+        case .scoreboard:
+            return String(
+                localized: "A scoreboard widget shows a sports scoreboard, controlled with an Apple Watch."
+            )
+        case .crop:
+            return String(localized: "A crop widget shows parts of a browser widget.")
+        case .wheelOfLuck:
+            return String(localized: "A wheel of luck widget shows a wheel of luck that you can spin.")
+        case .bingoCard:
+            return String(localized: "A bingo card widget shows an interactive bingo card.")
+        }
+    }
+}
+
+class SettingsScene: Codable, Identifiable, Equatable, ObservableObject, Named {
+    static let baseName = String(localized: "My scene")
+    @Published var name: String
+    var id: UUID = .init()
+    @Published var enabled: Bool = true
+    @Published var videoSource: SettingsVideoSource = .init()
+    @Published var widgets: [SettingsSceneWidget] = []
+    @Published var videoSourceRotation: Double = 0.0
+    @Published var videoStabilizationMode: SettingsVideoStabilizationMode = .off
+    @Published var overrideVideoStabilizationMode: Bool = false
+    @Published var fillFrame: Bool = false
+    @Published var overrideMic: Bool = false
+    @Published var micId: String = ""
+    @Published var quickSwitchGroup: Int?
+
+    init(name: String) {
+        self.name = name
+    }
+
+    static func == (lhs: SettingsScene, rhs: SettingsScene) -> Bool {
+        return lhs.id == rhs.id
+    }
+
+    enum CodingKeys: CodingKey {
+        case name,
+             id,
+             enabled,
+             cameraType,
+             cameraPosition,
+             backCameraId,
+             frontCameraId,
+             rtmpCameraId,
+             srtlaCameraId,
+             ristCameraId,
+             rtspCameraId,
+             whipCameraId,
+             whepCameraId,
+             mediaPlayerCameraId,
+             externalCameraId,
+             externalCameraName,
+             widgets,
+             videoSourceRotation,
+             videoStabilizationMode,
+             overrideVideoStabilizationMode,
+             fillFrame,
+             overrideMic,
+             micId,
+             quickSwitchGroup
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.name, name)
+        try container.encode(.id, id)
+        try container.encode(.enabled, enabled)
+        try container.encode(.cameraPosition, videoSource.cameraPosition)
+        try container.encode(.backCameraId, videoSource.backCameraId)
+        try container.encode(.frontCameraId, videoSource.frontCameraId)
+        try container.encode(.rtmpCameraId, videoSource.rtmpCameraId)
+        try container.encode(.srtlaCameraId, videoSource.srtlaCameraId)
+        try container.encode(.ristCameraId, videoSource.ristCameraId)
+        try container.encode(.rtspCameraId, videoSource.rtspCameraId)
+        try container.encode(.whipCameraId, videoSource.whipCameraId)
+        try container.encode(.whepCameraId, videoSource.whepCameraId)
+        try container.encode(.mediaPlayerCameraId, videoSource.mediaPlayerCameraId)
+        try container.encode(.externalCameraId, videoSource.externalCameraId)
+        try container.encode(.externalCameraName, videoSource.externalCameraName)
+        try container.encode(.widgets, widgets)
+        try container.encode(.videoSourceRotation, videoSourceRotation)
+        try container.encode(.videoStabilizationMode, videoStabilizationMode)
+        try container.encode(.overrideVideoStabilizationMode, overrideVideoStabilizationMode)
+        try container.encode(.fillFrame, fillFrame)
+        try container.encode(.overrideMic, overrideMic)
+        try container.encode(.micId, micId)
+        try container.encode(.quickSwitchGroup, quickSwitchGroup)
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = container.decode(.name, String.self, "")
+        id = container.decode(.id, UUID.self, .init())
+        enabled = container.decode(.enabled, Bool.self, true)
+        videoSource.cameraPosition = decodeCameraPosition(
+            container,
+            .cameraPosition,
+            defaultBackCameraPosition
+        )
+        videoSource.backCameraId = decodeCameraId(container, .backCameraId, bestBackCameraId)
+        videoSource.frontCameraId = decodeCameraId(container, .frontCameraId, bestFrontCameraId)
+        videoSource.rtmpCameraId = container.decode(.rtmpCameraId, UUID.self, .init())
+        videoSource.srtlaCameraId = container.decode(.srtlaCameraId, UUID.self, .init())
+        videoSource.ristCameraId = container.decode(.ristCameraId, UUID.self, .init())
+        videoSource.rtspCameraId = container.decode(.rtspCameraId, UUID.self, .init())
+        videoSource.whipCameraId = container.decode(.whipCameraId, UUID.self, .init())
+        videoSource.whepCameraId = container.decode(.whepCameraId, UUID.self, .init())
+        videoSource.mediaPlayerCameraId = container.decode(.mediaPlayerCameraId, UUID.self, .init())
+        videoSource.externalCameraId = container.decode(.externalCameraId, String.self, "")
+        videoSource.externalCameraName = container.decode(.externalCameraName, String.self, "")
+        widgets = container.decode(.widgets, [SettingsSceneWidget].self, [])
+        videoSourceRotation = container.decode(.videoSourceRotation, Double.self, 0.0)
+        videoStabilizationMode = container.decode(
+            .videoStabilizationMode,
+            SettingsVideoStabilizationMode.self,
+            .off
+        )
+        overrideVideoStabilizationMode = container.decode(.overrideVideoStabilizationMode, Bool.self, false)
+        fillFrame = container.decode(.fillFrame, Bool.self, false)
+        overrideMic = container.decode(.overrideMic, Bool.self, false)
+        micId = container.decode(.micId, String.self, "")
+        quickSwitchGroup = container.decode(.quickSwitchGroup, Int?.self, nil)
+    }
+
+    func clone() -> SettingsScene {
+        let new = SettingsScene(name: name)
+        new.enabled = enabled
+        new.videoSource = videoSource
+        for widget in widgets {
+            new.widgets.append(widget.clone())
+        }
+        new.videoSourceRotation = videoSourceRotation
+        new.videoStabilizationMode = videoStabilizationMode
+        new.overrideVideoStabilizationMode = overrideVideoStabilizationMode
+        new.fillFrame = fillFrame
+        new.overrideMic = overrideMic
+        new.micId = micId
+        new.quickSwitchGroup = quickSwitchGroup
+        return new
+    }
+
+    func toCameraId() -> SettingsCameraId {
+        return videoSource.toCameraId()
+    }
+
+    func updateCameraId(settingsCameraId: SettingsCameraId) {
+        videoSource.updateCameraId(settingsCameraId: settingsCameraId)
+    }
+}
+
+class SettingsAutoSceneSwitcherScene: Codable, Identifiable, ObservableObject {
+    var id: UUID = .init()
+    @Published var sceneId: UUID?
+    @Published var time: Int = 15
+
+    enum CodingKeys: CodingKey {
+        case id,
+             sceneId,
+             time
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.sceneId, sceneId)
+        try container.encode(.time, time)
+    }
+
+    init() {}
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        sceneId = container.decode(.sceneId, UUID?.self, nil)
+        time = container.decode(.time, Int.self, 15)
+    }
+}
+
+class SettingsAutoSceneSwitcher: Codable, Identifiable, ObservableObject, Named {
+    static let baseName = String(localized: "My switcher")
+    var id: UUID = .init()
+    @Published var name: String = baseName
+    @Published var shuffle: Bool = false
+    @Published var scenes: [SettingsAutoSceneSwitcherScene] = []
+
+    enum CodingKeys: CodingKey {
+        case id,
+             name,
+             shuffle,
+             scenes
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.id, id)
+        try container.encode(.name, name)
+        try container.encode(.shuffle, shuffle)
+        try container.encode(.scenes, scenes)
+    }
+
+    init() {}
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decode(.id, UUID.self, .init())
+        name = container.decode(.name, String.self, Self.baseName)
+        shuffle = container.decode(.shuffle, Bool.self, false)
+        scenes = container.decode(.scenes, [SettingsAutoSceneSwitcherScene].self, [])
+    }
+}
+
+class SettingsAutoSceneSwitchers: Codable, Identifiable, ObservableObject {
+    @Published var switcherId: UUID?
+    @Published var switchers: [SettingsAutoSceneSwitcher] = []
+
+    enum CodingKeys: CodingKey {
+        case switcherId, switchers
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(.switcherId, switcherId)
+        try container.encode(.switchers, switchers)
+    }
+
+    init() {}
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switcherId = try? container.decode(UUID?.self, forKey: .switcherId)
+        switchers = container.decode(.switchers, [SettingsAutoSceneSwitcher].self, [])
+    }
+}

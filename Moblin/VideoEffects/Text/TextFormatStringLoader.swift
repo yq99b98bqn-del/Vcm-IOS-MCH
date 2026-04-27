@@ -1,0 +1,335 @@
+import Foundation
+
+enum TextFormatPart: Equatable {
+    case text(String)
+    case newLine
+    case clock
+    case shortClock
+    case date
+    case fullDate
+    case bitrate
+    case bitrateAndTotal
+    case resolution
+    case fps
+    case debugOverlay
+    case speed
+    case averageSpeed
+    case altitude
+    case distance
+    case slope
+    case timer
+    case stopwatch
+    case conditions
+    case temperature
+    case feelsLikeTemperature
+    case wind
+    case country
+    case countryFlag
+    case state
+    case city
+    case checkbox
+    case rating
+    case subtitles(String?)
+    case muted
+    case heartRate(String)
+    case activeEnergyBurned
+    case power
+    case stepCount
+    case workoutDistance
+    case teslaBatteryLevel
+    case teslaDrive
+    case teslaMedia
+    case cyclingPower
+    case cyclingCadence
+    case runningPace(String)
+    case runningCadence(String)
+    case runningDistance(String)
+    case lapTimes
+    case browserTitle
+    case gForce
+    case gForceRecentMax
+    case gForceMax
+}
+
+class TextFormatLoader {
+    private var format: String = ""
+    private var parts: [TextFormatPart] = []
+    private var index: String.Index!
+    private var textStartIndex: String.Index!
+
+    func load(format inputFormat: String) -> [TextFormatPart] {
+        format = inputFormat.replacing("\\n", with: "\n")
+        parts = []
+        index = format.startIndex
+        textStartIndex = format.startIndex
+        while index < format.endIndex {
+            switch format[index] {
+            case "{":
+                let formatFromIndex = format[index ..< format.endIndex].lowercased()
+                if formatFromIndex.hasPrefix("{time}") {
+                    loadItem(part: .clock, offsetBy: 6)
+                } else if formatFromIndex.hasPrefix("{shorttime}") {
+                    loadItem(part: .shortClock, offsetBy: 11)
+                } else if formatFromIndex.hasPrefix("{date}") {
+                    loadItem(part: .date, offsetBy: 6)
+                } else if formatFromIndex.hasPrefix("{fulldate}") {
+                    loadItem(part: .fullDate, offsetBy: 10)
+                } else if formatFromIndex.hasPrefix("{bitrate}") {
+                    loadItem(part: .bitrate, offsetBy: 9)
+                } else if formatFromIndex.hasPrefix("{bitrateandtotal}") {
+                    loadItem(part: .bitrateAndTotal, offsetBy: 17)
+                } else if formatFromIndex.hasPrefix("{resolution}") {
+                    loadItem(part: .resolution, offsetBy: 12)
+                } else if formatFromIndex.hasPrefix("{fps}") {
+                    loadItem(part: .fps, offsetBy: 5)
+                } else if formatFromIndex.hasPrefix("{debugoverlay}") {
+                    loadItem(part: .debugOverlay, offsetBy: 14)
+                } else if formatFromIndex.hasPrefix("{speed}") {
+                    loadItem(part: .speed, offsetBy: 7)
+                } else if formatFromIndex.hasPrefix("{averagespeed}") {
+                    loadItem(part: .averageSpeed, offsetBy: 14)
+                } else if formatFromIndex.hasPrefix("{altitude}") {
+                    loadItem(part: .altitude, offsetBy: 10)
+                } else if appendRunDistanceIfPresent(formatFromIndex: formatFromIndex) {
+                } else if formatFromIndex.hasPrefix("{distance}") {
+                    loadItem(part: .distance, offsetBy: 10)
+                } else if formatFromIndex.hasPrefix("{slope}") {
+                    loadItem(part: .slope, offsetBy: 7)
+                } else if formatFromIndex.hasPrefix("{timer}") {
+                    loadItem(part: .timer, offsetBy: 7)
+                } else if formatFromIndex.hasPrefix("{stopwatch}") {
+                    loadItem(part: .stopwatch, offsetBy: 11)
+                } else if formatFromIndex.hasPrefix("{conditions}") {
+                    loadItem(part: .conditions, offsetBy: 12)
+                } else if formatFromIndex.hasPrefix("{temperature}") {
+                    loadItem(part: .temperature, offsetBy: 13)
+                } else if formatFromIndex.hasPrefix("{feelsliketemperature}") {
+                    loadItem(part: .feelsLikeTemperature, offsetBy: 22)
+                } else if formatFromIndex.hasPrefix("{wind}") {
+                    loadItem(part: .wind, offsetBy: 6)
+                } else if formatFromIndex.hasPrefix("{country}") {
+                    loadItem(part: .country, offsetBy: 9)
+                } else if formatFromIndex.hasPrefix("{countryflag}") {
+                    loadItem(part: .countryFlag, offsetBy: 13)
+                } else if formatFromIndex.hasPrefix("{state}") {
+                    loadItem(part: .state, offsetBy: 7)
+                } else if formatFromIndex.hasPrefix("{city}") {
+                    loadItem(part: .city, offsetBy: 6)
+                } else if formatFromIndex.hasPrefix("{checkbox}") {
+                    loadItem(part: .checkbox, offsetBy: 10)
+                } else if formatFromIndex.hasPrefix("{rating}") {
+                    loadItem(part: .rating, offsetBy: 8)
+                } else if formatFromIndex.hasPrefix("{muted}") {
+                    loadItem(part: .muted, offsetBy: 7)
+                } else if appendHeartRateIfPresent(formatFromIndex: formatFromIndex) {
+                } else if appendSubtitlesIfPresent(formatFromIndex: formatFromIndex) {
+                } else if appendPaceIfPresent(formatFromIndex: formatFromIndex) {
+                } else if appendCadenceIfPresent(formatFromIndex: formatFromIndex) {
+                } else if !isMac(), formatFromIndex.hasPrefix("{activeenergyburned}") {
+                    loadItem(part: .activeEnergyBurned, offsetBy: 20)
+                } else if !isMac(), formatFromIndex.hasPrefix("{power}") {
+                    loadItem(part: .power, offsetBy: 7)
+                } else if !isMac(), formatFromIndex.hasPrefix("{stepcount}") {
+                    loadItem(part: .stepCount, offsetBy: 11)
+                } else if !isMac(), formatFromIndex.hasPrefix("{workoutdistance}") {
+                    loadItem(part: .workoutDistance, offsetBy: 17)
+                } else if formatFromIndex.hasPrefix("{teslabatterylevel}") {
+                    loadItem(part: .teslaBatteryLevel, offsetBy: 19)
+                } else if formatFromIndex.hasPrefix("{tesladrive}") {
+                    loadItem(part: .teslaDrive, offsetBy: 12)
+                } else if formatFromIndex.hasPrefix("{teslamedia}") {
+                    loadItem(part: .teslaMedia, offsetBy: 12)
+                } else if formatFromIndex.hasPrefix("{cyclingpower}") {
+                    loadItem(part: .cyclingPower, offsetBy: 14)
+                } else if formatFromIndex.hasPrefix("{cyclingcadence}") {
+                    loadItem(part: .cyclingCadence, offsetBy: 16)
+                } else if formatFromIndex.hasPrefix("{laptimes}") {
+                    loadItem(part: .lapTimes, offsetBy: 10)
+                } else if formatFromIndex.hasPrefix("{browsertitle}") {
+                    loadItem(part: .browserTitle, offsetBy: 14)
+                } else if formatFromIndex.hasPrefix("{gforce}") {
+                    loadItem(part: .gForce, offsetBy: 8)
+                } else if formatFromIndex.hasPrefix("{gforcerecentmax}") {
+                    loadItem(part: .gForceRecentMax, offsetBy: 17)
+                } else if formatFromIndex.hasPrefix("{gforcemax}") {
+                    loadItem(part: .gForceMax, offsetBy: 11)
+                } else {
+                    index = format.index(after: index)
+                }
+            case "\n":
+                loadItem(part: .newLine, offsetBy: 1)
+            default:
+                index = format.index(after: index)
+            }
+        }
+        appendTextIfPresent()
+        return parts
+    }
+
+    private func appendHeartRateIfPresent(formatFromIndex: String) -> Bool {
+        if formatFromIndex.hasPrefix("{heartrate}") {
+            loadItem(part: .heartRate(""), offsetBy: 11)
+            return true
+        } else if let match = formatFromIndex.prefixMatch(of: /{heartrate:([^}]+)}/) {
+            let deviceName = String(match.output.1)
+            loadItem(part: .heartRate(deviceName), offsetBy: match.output.0.count)
+            return true
+        } else {
+            return false
+        }
+    }
+
+    private func appendPaceIfPresent(formatFromIndex: String) -> Bool {
+        if formatFromIndex.hasPrefix("{runningpace}") {
+            loadItem(part: .runningPace(""), offsetBy: 13)
+            return true
+        } else if let match = formatFromIndex.prefixMatch(of: /{runningpace:([^}]+)}/) {
+            let deviceName = String(match.output.1)
+            loadItem(part: .runningPace(deviceName), offsetBy: match.output.0.count)
+            return true
+        } else {
+            return false
+        }
+    }
+
+    private func appendCadenceIfPresent(formatFromIndex: String) -> Bool {
+        if formatFromIndex.hasPrefix("{runningcadence}") {
+            loadItem(part: .runningCadence(""), offsetBy: 16)
+            return true
+        } else if let match = formatFromIndex.prefixMatch(of: /{runningcadence:([^}]+)}/) {
+            let deviceName = String(match.output.1)
+            loadItem(part: .runningCadence(deviceName), offsetBy: match.output.0.count)
+            return true
+        } else {
+            return false
+        }
+    }
+
+    private func appendRunDistanceIfPresent(formatFromIndex: String) -> Bool {
+        if formatFromIndex.hasPrefix("{runningdistance}") {
+            loadItem(part: .runningDistance(""), offsetBy: 17)
+            return true
+        } else if let match = formatFromIndex.prefixMatch(of: /{runningdistance:([^}]+)}/) {
+            let deviceName = String(match.output.1)
+            loadItem(part: .runningDistance(deviceName), offsetBy: match.output.0.count)
+            return true
+        } else {
+            return false
+        }
+    }
+
+    private func appendSubtitlesIfPresent(formatFromIndex: String) -> Bool {
+        if formatFromIndex.hasPrefix("{subtitles}") {
+            loadItem(part: .subtitles(nil), offsetBy: 11)
+            return true
+        } else if let match = formatFromIndex.prefixMatch(of: /{subtitles:([^}]+)}/) {
+            let languageIdentifier = String(match.output.1)
+            loadItem(part: .subtitles(languageIdentifier), offsetBy: match.output.0.count)
+            return true
+        } else {
+            return false
+        }
+    }
+
+    private func appendTextIfPresent() {
+        if textStartIndex < index {
+            parts.append(.text(String(format[textStartIndex ..< index])))
+        }
+    }
+
+    private func loadItem(part: TextFormatPart, offsetBy: Int) {
+        appendTextIfPresent()
+        parts.append(part)
+        index = format.index(index, offsetBy: offsetBy)
+        textStartIndex = index
+    }
+}
+
+func loadTextFormat(format: String) -> [TextFormatPart] {
+    return TextFormatLoader().load(format: format)
+}
+
+extension [TextFormatPart] {
+    func getCheckboxText(index: Int) -> String {
+        var afterCheckbox = false
+        var checkboxTexts: [String] = []
+        var currentIndex = 0
+        for part in self {
+            switch part {
+            case let .text(text):
+                if afterCheckbox {
+                    checkboxTexts.append(text)
+                    afterCheckbox = false
+                }
+            case .newLine:
+                if afterCheckbox {
+                    checkboxTexts.append("Checkbox \(currentIndex)")
+                }
+                afterCheckbox = false
+            case .checkbox:
+                if afterCheckbox {
+                    checkboxTexts.append("Checkbox \(currentIndex)")
+                }
+                afterCheckbox = true
+                currentIndex += 1
+            default:
+                break
+            }
+        }
+        guard index < checkboxTexts.count else {
+            return ""
+        }
+        return checkboxTexts[index]
+    }
+
+    func isWorkoutVariable() -> Bool {
+        if contains(.heartRate("")) {
+            return true
+        } else if contains(.activeEnergyBurned) {
+            return true
+        } else if contains(.power) {
+            return true
+        } else if contains(.stepCount) {
+            return true
+        } else if contains(.workoutDistance) {
+            return true
+        }
+        return false
+    }
+
+    func isWeatherVariable() -> Bool {
+        if contains(.conditions) {
+            return true
+        } else if contains(.temperature) {
+            return true
+        } else if contains(.feelsLikeTemperature) {
+            return true
+        } else if contains(.wind) {
+            return true
+        }
+        return false
+    }
+
+    func isLocationVariable() -> Bool {
+        if contains(.speed) {
+            return true
+        } else if contains(.averageSpeed) {
+            return true
+        } else if contains(.altitude) {
+            return true
+        } else if contains(.distance) {
+            return true
+        } else if contains(.slope) {
+            return true
+        } else if contains(.country) {
+            return true
+        } else if contains(.countryFlag) {
+            return true
+        } else if contains(.state) {
+            return true
+        } else if contains(.city) {
+            return true
+        }
+        return false
+    }
+}
